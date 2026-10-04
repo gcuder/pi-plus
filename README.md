@@ -4,7 +4,7 @@ A version-controlled, portable setup for reproducing this Pi coding-agent config
 
 ## Quick install
 
-Requirements: Node.js 20+ (with npm), Git, and a supported OS. Then:
+Requirements: Node.js 22.19+ (with npm), Git, and a supported OS. Then:
 
 ```sh
 git clone git@github.com:gcuder/pi-plus.git

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Portable Pi coding agent configuration",
+  "allowScripts": {"esbuild": true, "protobufjs": true, "@google/genai": false},
   "dependencies": {
     "@narumitw/pi-lsp": "^0.49.9",
     "@nguyenquangthai/pi-omp-theme": "^1.0.15",

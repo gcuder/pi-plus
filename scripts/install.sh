@@ -9,8 +9,9 @@ BACKUP_DIR="$PI_AGENT_DIR/backups/pi-plus-$(date +%Y%m%d-%H%M%S)"
 info() { printf '\033[1;34m[pi-plus]\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m[pi-plus] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-command -v node >/dev/null 2>&1 || fail "Node.js is required. Install Node.js 20 or newer, then rerun this script."
-command -v npm >/dev/null 2>&1 || fail "npm is required. Install Node.js 20 or newer, then rerun this script."
+command -v node >/dev/null 2>&1 || fail "Node.js is required. Install Node.js 22.19 or newer, then rerun this script."
+command -v npm >/dev/null 2>&1 || fail "npm is required. Install Node.js 22.19 or newer, then rerun this script."
+node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 19)) process.exit(1)' || fail "Pi Plus requires Node.js 22.19 or newer."
 
 if ! command -v pi >/dev/null 2>&1; then
   info "Installing Pi coding agent..."
