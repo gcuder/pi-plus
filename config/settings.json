@@ -1,0 +1,10 @@
+{
+  "packages": [
+    "npm:pi-hashline-edit-pro",
+    "npm:@narumitw/pi-lsp",
+    "npm:pi-code",
+    "npm:@nguyenquangthai/pi-omp-theme",
+    "npm:pi-x-ide"
+  ],
+  "theme": "titanium"
+}

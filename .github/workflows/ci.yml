@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Validate JSON manifests
+        run: |
+          node -e 'for (const file of ["package.json", "package-lock.json", "config/settings.json", "config/models.json"]) JSON.parse(require("fs").readFileSync(file, "utf8"))'
+      - name: Validate shell scripts
+        run: bash -n scripts/install.sh scripts/update.sh scripts/doctor.sh
+      - name: Validate locked dependencies
+        run: npm ci --ignore-scripts

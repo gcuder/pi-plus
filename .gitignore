@@ -1,0 +1,12 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+**/auth.json
+**/mcp-auth.json
+**/*secrets*
+
+# Dependency installs and OS/editor artifacts
+node_modules/
+.DS_Store
+*.log
