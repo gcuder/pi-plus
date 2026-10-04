@@ -1,0 +1,33 @@
+{
+  "version": "5.1.0",
+  "files": {
+    "index.ts": {
+      "before": "76fd9ccce1ffe171ac73fb2c1c70938af2907be1fee79086b426e7744865fd31",
+      "after": "dfe128e81bcf374240da3a8a713d0bf3835f94a1542c4fed1e700d5dbf0d3738"
+    },
+    "src/batch.ts": {
+      "before": "76870046dce687c4be31422c965492d78e24f652734e4cd97e40d02762e39580",
+      "after": "9165a29bcb12288c0b1ff367702d33285468f1439ee8150bfa9bc6f39bccbf35"
+    },
+    "src/commit.ts": {
+      "before": "710f0e4bb41ce08856c052dac27f9ed24f4a0811b9c61faf1d2b1088fd4a4fd9",
+      "after": "5350a8086727f7c8de1146542d38e081e2e44b6f815aed39c0f82347bcacb97a"
+    },
+    "src/file-reader.ts": {
+      "before": "31497815f5503dc7198557519617b2fa7170febe873ab67a17e0915800610c90",
+      "after": "ff9b76d2a2ef2812566c8437f2a5aa39a2dad1739a2e5f96c25b1782345bd836"
+    },
+    "src/replace.ts": {
+      "before": "b63e0d2643d8a41bc966f7df51e65b003679c283f84e42bd562f9a13286e3a0c",
+      "after": "e4f0755d3bc74b565e074353d9438d4e6279a1987e00cea3c985eb47bc2a9c53"
+    },
+    "src/preview-capture.ts": {
+      "before": null,
+      "after": "d998064272ef3f23d31ed9f718878c70ce05b19b9971c888546a453dd23d1c7f"
+    },
+    "src/review-preview.ts": {
+      "before": null,
+      "after": "032a7cf9da6bc33f21000a3864684f31c3cc17002cb5aba385876af8b294cf55"
+    }
+  }
+}

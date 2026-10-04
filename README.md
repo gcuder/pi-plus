@@ -18,12 +18,14 @@ Or, after cloning, run `./scripts/doctor.sh` to check the setup. Authenticate yo
 
 - `config/settings.json`: Pi packages and Titanium theme selection.
 - `config/models.json`: custom model/provider configuration (currently empty).
-- `extensions/`: local Orca integration extensions currently used by this setup.
+- `extensions/`: local Orca integrations and a [JetBrains IDE bridge](extensions/jetbrains-ide/README.md) to the official Claude Code plugin (automatic pre-edit native diff approval, explicit editor context; `/edit-mode review` default, `/edit-mode auto` bypass).
 - `skills/`: place any Pi skills here; they are installed into `~/.pi/agent/skills`.
 - `package.json` / `package-lock.json`: locked runtime extensions, themes, and package integrations.
 - `scripts/install.sh`: installs Pi when absent, backs up managed settings, installs packages, and deploys the repository configuration.
 - `scripts/update.sh`: fast-forward pulls this checkout, then reinstalls it.
 - `scripts/doctor.sh`: validates the local install.
+
+The installer applies a version/content-guarded read-only preview adapter to pinned `pi-hashline-edit-pro` **5.1.0**. Normal editing tools wait for PyCharm Apply/Reject before execution; no `ide_diff` opt-in is needed. Review mode blocks mutations if no matching IDE/adapter is available. Use `/edit-mode auto` for terminal-only editing. See the bridge README for limitations and manual native-UI acceptance tests.
 
 The settings and model config are managed files and will be replaced by `install.sh` (the existing versions are backed up under `~/.pi/agent/backups/`). Extension files are copied into the Pi agent directory; files not tracked here are left untouched. `PI_DIR` can be set to use a different Pi data root.
 
@@ -44,3 +46,4 @@ This repository does **not** contain `auth.json`, `mcp-auth.json`, model API key
 ## GitHub
 
 Repository: <https://github.com/gcuder/pi-plus>
+test
