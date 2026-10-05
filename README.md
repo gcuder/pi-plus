@@ -46,4 +46,3 @@ This repository does **not** contain `auth.json`, `mcp-auth.json`, model API key
 ## GitHub
 
 Repository: <https://github.com/gcuder/pi-plus>
-test
