@@ -3,7 +3,7 @@ import { Type } from "typebox";
 import { discover, type IdeInstance } from "./discovery.ts";
 import { IdeProtocol } from "./protocol.ts";
 import { IdeContext } from "./context.ts";
-import { EditReview } from "./review.ts";
+import { EditReview, type EditMode } from "./review.ts";
 import { registerReviewedEditing } from "./editing.ts";
 import { withAbort } from "./abort.ts";
 
@@ -21,6 +21,16 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
   const review = new EditReview(ensureConnected);
   registerReviewedEditing(pi, review);
 
+  function setEditMode(mode: EditMode, ctx: ExtensionContext): void {
+    review.setMode(mode);
+    ctx.ui.setStatus("edit-mode", review.editMode.toUpperCase());
+  }
+
+  function updateIdeStatus(ctx: ExtensionContext): void {
+    ctx.ui.setStatus("jetbrains-ide", ide?.connection.connected && summary
+      ? `IDE: ${summary.ideName}` : "IDE: disconnected");
+  }
+
   function disconnect(): void {
     generation++;
     connecting?.close(); connecting = undefined;
@@ -33,6 +43,7 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
     if (attempt) await withAbort(attempt, ctx.signal);
     if (ide?.connection.connected && (port === undefined || summary?.port === port)) return ide;
     disconnect();
+    updateIdeStatus(ctx);
     const epoch = generation;
     attempt = (async () => {
       const candidates = await withAbort(discover(ctx.cwd), ctx.signal);
@@ -51,7 +62,7 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
           if (ide !== client) return;
           ide = undefined; summary = undefined; context.clear();
           review.cancelPending();
-          ctx.ui.setStatus("jetbrains-ide", undefined);
+          updateIdeStatus(ctx);
           ctx.ui.notify("IDE disconnected. Pending IDE requests failed; run /ide to reconnect.", "warning");
         };
         try {
@@ -59,7 +70,7 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
           if (epoch !== generation || ctx.signal?.aborted) { client.close(); throw new Error("IDE connection cancelled"); }
           ide = client;
           summary = { port: instance.port, ideName: instance.ideName, workspaceFolders: instance.workspaceFolders };
-          ctx.ui.setStatus("jetbrains-ide", `IDE: ${instance.ideName}`);
+          updateIdeStatus(ctx);
           return;
         } catch (e) {
           client.close(); context.clear();
@@ -80,7 +91,7 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
       const arg = args.trim();
       if (arg === "disconnect") {
         review.cancelPending();
-        disconnect(); ctx.ui.setStatus("jetbrains-ide", undefined);
+        disconnect(); updateIdeStatus(ctx);
         ctx.ui.notify("IDE disconnected", "info"); return;
       }
       if (arg === "status") {
@@ -121,9 +132,16 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
       if (mode && mode !== "auto" && mode !== "review") {
         ctx.ui.notify("Usage: /edit-mode [auto|review]", "error"); return;
       }
-      if (mode === "auto" || mode === "review") review.setMode(mode);
-      ctx.ui.setStatus("edit-mode", `Edits: ${review.editMode}`);
+      setEditMode(mode === "auto" || mode === "review" ? mode : review.editMode, ctx);
       ctx.ui.notify(`Edit mode: ${review.editMode}${review.editMode === "review" ? " — normal editing tools wait for native IDE approval" : " — edits execute normally without IDE review"}`, "info");
+    },
+  });
+  // Ctrl+R is Pi's session-rename action; pi-code uses Ctrl+Alt+P for Plan Mode.
+  pi.registerShortcut("alt+r", {
+    description: "Toggle edit mode (Review/Auto)",
+    handler: ctx => {
+      setEditMode(review.editMode === "review" ? "auto" : "review", ctx);
+      ctx.ui.notify(`Edit mode: ${review.editMode.toUpperCase()}`, "info");
     },
   });
   // Old editing extensions cannot safely participate without a supported preview.
@@ -133,8 +151,8 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
     }
   });
   pi.on("session_start", (_event, ctx) => {
-    review.cancelPending(); review.setMode("review");
-    ctx.ui.setStatus("edit-mode", "Edits: review");
+    review.cancelPending(); setEditMode("review", ctx);
+    updateIdeStatus(ctx);
   });
   pi.on("session_shutdown", async () => { review.cancelPending(); disconnect(); });
 }
