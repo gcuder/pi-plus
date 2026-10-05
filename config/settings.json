@@ -4,5 +4,12 @@
     "npm:pi-code",
     "npm:@nguyenquangthai/pi-omp-theme"
   ],
-  "theme": "titanium"
+  "theme": "titanium",
+  "piOmpTheme": {
+    "statusLine": {
+      "layout": {
+        "secondary": ["extension_statuses"]
+      }
+    }
+  }
 }

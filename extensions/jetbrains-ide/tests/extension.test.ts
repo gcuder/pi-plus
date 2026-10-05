@@ -5,7 +5,7 @@ import jetbrainsIde from "../index.ts";
 
 test("factory wraps native edit/write and registers context, edit-mode and legacy-tool gate", async () => {
   const commands = new Map<string, any>(), handlers = new Map<string, any>(), tools = new Map<string, any>(), notices: string[] = [];
-  const pi = { registerCommand: (name: string, command: unknown) => commands.set(name, command),
+  const pi = { registerShortcut: () => {}, registerCommand: (name: string, command: unknown) => commands.set(name, command),
     registerTool: (tool: { name: string }) => tools.set(tool.name, tool), on: (name: string, handler: unknown) => handlers.set(name, handler),
   } as unknown as ExtensionAPI;
   jetbrainsIde(pi);

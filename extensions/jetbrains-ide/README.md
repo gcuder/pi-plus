@@ -30,6 +30,12 @@ In Pi, with the same repository open in PyCharm:
 /ide disconnect
 ```
 
+**Alt+R** toggles Review/Auto using the same mode switch as `/edit-mode`. Ctrl+R remains Pi's session-rename shortcut; Shift+Tab remains thinking-level cycling; pi-code's Ctrl+Alt+P still controls Plan Mode.
+
+Pi's persistent extension status row shows **REVIEW** (the session default) or **AUTO**, followed by `IDE: PyCharm` when connected or `IDE: disconnected` when there is no active connection. Both the command and shortcut update it immediately. The items coexist with Plan Mode and other extension statuses, including in status-aware custom footers. Displaying status never discovers or connects to an IDE. Switching to Auto cancels pending reviews without approving them.
+
+Pi+'s `config/settings.json` enables OMP's supported `extension_statuses` secondary row. OMP's default Claude preset hides that row; other custom footers must also opt into showing extension statuses. On macOS, configure your terminal's Option key to send Alt for Alt+R.
+
 `/ide` discovers lazily; no startup socket or background reconnect loop. Pending changes are never replayed after reconnect. Disconnect cancels pending reviews; a subsequent Review-mode mutation or explicit IDE command can reconnect. To edit without an IDE, use `/edit-mode auto`.
 
 **Ask Pi to edit normally**, e.g. “Read `example.py` and replace this function.” The model uses its existing tools, not `ide_diff`:
@@ -106,7 +112,7 @@ npm test --prefix extensions/jetbrains-ide
 npm run typecheck --prefix extensions/jetbrains-ide
 ```
 
-Tests use Node's built-in runner, fake sockets and temporary fixtures; no PyCharm is required. Native tool tests compare reviewed execution against unmodified Pi definitions, including results and BOM/CRLF/mixed-ending bytes. Coverage includes transport/auth/discovery, registration/modes, multi-replacement edits, parallel same-file calls, rejection without creating directories, stale files, edited proposals, invalid inputs, unsafe paths, late symlink/inode replacement, tool ownership conflicts, unsupported Pi versions and cancellation. A real SDK session verifies argument preparation, validation and permission hooks. Strict TypeScript checks cover the extension and tests.
+Tests use Node's built-in runner, fake sockets and temporary fixtures; no PyCharm is required. Native tool tests compare reviewed execution against unmodified Pi definitions, including results and BOM/CRLF/mixed-ending bytes. Coverage includes transport/auth/discovery, registration/modes, multi-replacement edits, parallel same-file calls, rejection without creating directories, stale files, edited proposals, invalid inputs, unsafe paths, late symlink/inode replacement, tool ownership conflicts, unsupported Pi versions and cancellation. A real SDK session verifies argument preparation, validation and permission hooks. A real Pi TUI with a test terminal verifies shortcut registration, terminal key dispatch, persistent footer rendering and coexistence with pi-code Plan Mode. A fake JetBrains server verifies that toggling to Auto cancels active and queued reviews without writing. Strict TypeScript checks cover the extension and tests.
 
 Automated approval tests simulate IDE decisions. The previous bridge's handshake/tabs/diagnostics and live UI were verified against plugin 0.1.14-beta; the migrated native editing flow still needs the manual Apply/Reject checks below.
 
