@@ -11,8 +11,11 @@ export class IdeProtocol {
   tools: IdeTool[] = [];
   serverVersion = "unknown";
 
-  async connect(instance: IdeInstance, factory?: SocketFactory): Promise<void> {
+  async connect(instance: IdeInstance, factory?: SocketFactory, signal?: AbortSignal): Promise<void> {
     if (!Number.isInteger(instance.port) || instance.port < 1 || instance.port > 65535) throw new Error("Invalid local IDE port");
+    if (signal?.aborted) throw new Error("IDE connection cancelled");
+    const abort = () => this.close();
+    signal?.addEventListener("abort", abort, { once: true });
     try {
       await this.connection.open(`ws://127.0.0.1:${instance.port}/`, "mcp", { [AUTH_HEADER]: instance.authToken }, factory);
       const init = await this.connection.request("initialize", {
@@ -27,7 +30,12 @@ export class IdeProtocol {
       // Confirmed plugin-specific notification; associates this external client's PID.
       this.connection.notify("ide_connected", { pid: process.pid, isPluginVersionUnsupported: false });
       await this.refreshTools();
-    } catch (error) { this.close(); throw error; }
+    } catch (error) {
+      this.close();
+      if (signal?.aborted) throw new Error("IDE connection cancelled");
+      throw error;
+    }
+    finally { signal?.removeEventListener("abort", abort); }
   }
 
   async refreshTools(): Promise<void> {

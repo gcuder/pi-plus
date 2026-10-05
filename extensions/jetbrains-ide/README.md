@@ -4,16 +4,18 @@ A local Pi extension for an **external terminal** and the existing official Clau
 
 ## Install / use
 
-Requires Pi **1.0.2** (`@earendil-works/pi-coding-agent`), Node 22.19+, the `patch` utility, **pi-hashline-edit-pro 5.1.0**, and the official Claude Code JetBrains plugin enabled in PyCharm. Tested protocol target: plugin **0.1.14-beta**. No running Claude Code CLI or Claude login is needed for the local handshake.
+Requires Pi **1.0.2** (`@earendil-works/pi-coding-agent`), Node 22.19+, and the official Claude Code JetBrains plugin enabled in PyCharm. Tested protocol target: plugin **0.1.14-beta**. No running Claude Code CLI or Claude login is needed for the local handshake.
 
 ```sh
-# Deploy Pi+ plus the guarded read-only hashline preview adapter:
+# Deploy Pi+ and the reviewed built-in editing tools:
 ./scripts/install.sh
 ./scripts/doctor.sh
 pi
 ```
 
-Restart Pi after installation (or `/reload`); do not load the deployed copy and checkout copy together. The installer installs the isolated `ws` transport dependency and patches only the pinned, SHA-256-verified hashline sources. Unknown versions or altered sources are refused; **never force the patch**. No package patching occurs at runtime.
+Restart Pi after installation; do not load the deployed copy and checkout copy together. The installer installs the isolated `ws` transport dependency and uses Pi's public tool factories. It does not patch dependency sources.
+
+Existing installs: running the installer replaces the managed settings and npm dependency tree, removing `pi-hashline-edit-pro`. Remove any additional user/project declarations or manually installed copies of that extension before restarting. Review mode checks that the bridge owns `edit` and `write` on every call and blocks conflicting registrations. Remove conflicting editing extensions before restarting.
 
 In Pi, with the same repository open in PyCharm:
 
@@ -32,16 +34,16 @@ In Pi, with the same repository open in PyCharm:
 
 **Ask Pi to edit normally**, e.g. “Read `example.py` and replace this function.” The model uses its existing tools, not `ide_diff`:
 
-1. Pi's pre-execution `tool_call` hook requests a read-only proposal for `write`, `replace`, `replace_within`, `insert`, `copy`, `move`, or `undo_last_change`.
-2. The official plugin opens its native diff. Disk files, anchors and undo are unchanged during preview.
-3. **Apply** (the plugin's Accept equivalent) authorizes the **original tool call**, with its original arguments and normal validation/permissions/undo behavior.
-4. **Reject**, closing the tab, stale files, missing adapter/IDE, unknown response, or connection loss returns `{ block: true, reason }`; the original tool never runs. There is no mutate-then-undo fallback.
+1. The bridge registers Pi's built-in `edit` and `write` definitions with supported filesystem hooks. Schemas, argument preparation, matching, newline handling, rendering and result details come from Pi.
+2. The native tool computes its proposal inside Pi's per-file mutation queue. The official plugin opens its native diff before any write or parent directory creation.
+3. **Apply** authorizes the exact computed proposal. The same native execution continues and writes it after checking that disk content is unchanged.
+4. **Reject**, closing the tab, stale files, missing IDE, unknown response, cancellation or connection loss fails the tool without writing. There is no mutate-then-undo fallback.
 
-Same-file replace/insert batches review their **combined final proposal once**, before even staging a member. Remaining members share that approval only while their exact proposal/read set stays unchanged. Cross-file moves show both file diffs and require both approvals before either file changes. Copy previews also track the unchanged source as a read dependency. No-op calls need no IDE review.
+Use one `edit` call with multiple disjoint `edits[]` entries to review a combined change to one file. Separate calls each get their own review; calls targeting the same file are serialized through review and commit. Changes to different files are not an all-or-nothing transaction. No-op calls need no IDE review.
 
-The native proposed side is editable, but **editing it makes approval fail closed** (except the plugin's LF normalization). Arbitrary UI edits cannot be translated safely into the original anchor arguments. Reject and request a revised edit instead. Original tool execution preserves BOM and newline behavior; the IDE's normalized response is never written directly.
+The native proposed side is editable, but **editing it makes approval fail closed** (except the plugin's LF normalization). Reject and request a revised edit instead. Pi's native tool remains responsible for BOM and newline behavior; the IDE response is never written directly.
 
-`ide_diff` was removed: review is an internal approval primitive, not a model-facing opt-in editing tool. `/edit-mode` is independent of `pi-code` Plan Mode; existing permissions can still block an accepted tool. Auto exits before proposal generation, disk inspection, adapter requests, or IDE work.
+`ide_diff` was removed: review is internal to normal editing, not a model-facing opt-in tool. `/edit-mode` is independent of `pi-code` Plan Mode. Calls still pass through Pi's tool validation and permission hooks before execution. Auto delegates directly to unmodified native tools without review-specific proposals, disk checks or IDE work.
 
 ### Explicit editor context
 
@@ -78,7 +80,7 @@ Research reference: <https://github.com/ldelossa/pi-ide/blob/main/client.ts> (`@
 - Realpath workspace scoring: exact match, deepest ancestor, then nearest child workspace. Unrelated workspaces are never auto-selected. Multiple candidates are ranked deterministically by score then port; failed handshakes fall back to the next candidate. `/ide list` and `/ide <port>` allow explicit selection among matches.
 - Always numeric port + literal IPv4 loopback; no lock-supplied host/URL, redirects, DNS discovery or remote transport. Lock files are read, never modified/deleted.
 - Tokens exist only during discovery/upgrade, not in status, model context, transcript entries, configuration or error logs. Transport/RPC errors are sanitized. Local processes running as your user can still access the original Claude lock directory; protect its permissions.
-- Diff targets must be regular text files inside Pi's current working directory (or new write targets, including missing parents). Symlink targets and outside paths are rejected. Disk changes during review abort the write. This is optimistic checking, not an atomic cross-process lock: do not concurrently edit the same file during Apply.
+- Diff targets must be regular text files inside Pi's current working directory (or new write targets, including missing parents). Symlink targets and outside paths are rejected. Snapshots and commits use `O_NOFOLLOW`; existing targets must retain their reviewed file identity and bytes. Commits write through the verified file descriptor, and new files use exclusive creation. Filesystems without `O_NOFOLLOW` support fail closed. Disk changes during review abort the write. This is optimistic checking, not an atomic cross-process lock: do not concurrently edit the same file or rename its parent directories during Apply.
 
 ## Limitations / compatibility
 
@@ -88,39 +90,36 @@ This is an **unofficial internal Claude IDE protocol**, not a supported Anthropi
 - Save existing PyCharm buffers before review. The IDE's original side can include unsaved edits; there is no advertised dirty-buffer/revision query to reconcile them with disk.
 - Native response LF normalization is accounted for; the original tool remains responsible for exact BOM/newline bytes. Proposals over 2 MiB, binary/invalid UTF-8 files, symlinks and targets outside Pi's cwd fail closed in Review mode.
 - No filesystem sandbox: shell scripts, formatters, custom tools, deletion/rename through other tools, and other processes are **not intercepted**. A rejected change must not be retried via another tool. Review protects the listed mutation tools, not arbitrary disk access.
-- Cross-file approval is all-or-nothing before execution, not a new transactional writer. Original copy/move semantics still govern commit and undo; cross-file move undo continues to require undoing both files.
-- Review timeout: 30 minutes; ordinary RPC timeout: 10 seconds; connection timeout: 5 seconds. Close/reject the native tab or use `/ide disconnect` / `/edit-mode auto` to cancel a pending review. Switching mode cancels the pending call; it does **not** retroactively approve it. Pi's `tool_call` context does not guarantee an abort signal, so Escape alone may not close a pending IDE request immediately. Original tools retain their abort checks. Best-effort tab cleanup is not guaranteed if the IDE vanishes.
+- Review covers only `edit` and `write`. There is no built-in anchor editing, cross-file move/copy, batch undo or rollback. Legacy `replace`, `replace_within`, `insert`, `copy`, `move` and `undo_last_change` calls are blocked in Review mode if another extension still registers them.
+- Review timeout: 30 minutes; ordinary RPC timeout: 10 seconds; connection timeout: 5 seconds. Close/reject the native tab or use `/ide disconnect` / `/edit-mode auto` to cancel a pending review. Switching mode cancels the pending call; it does **not** retroactively approve it. Native tool abort signals cancel pending reviews and queued edits. Cancellation cannot reverse a filesystem write already in progress. Best-effort tab cleanup is not guaranteed if the IDE vanishes.
 - No heartbeats initiated by this client; server MCP pings are answered. A half-open connection is detected by request timeout/transport failure, not immediately while idle.
-- `pi-code` remains owner of Plan Mode and permissions. The bridge does not change active tools or translate accepted edits into a nested `write`.
-- Hashline remains owner of anchors, byte encoding, batch commits, undo and session state. This is a narrow **454-line local patch**, not a second anchor resolver. Its event-bus adapter shares the loaded hashline instance/session registry, reuses real read-only pipelines, captures their bytes/read dependencies, and shares batch planning/composition and byte reconstruction with original execution. `requirePath` is neither enabled nor changed. Re-port and test the adapter before upgrading hashline beyond the pinned version.
+- `pi-code` remains owner of Plan Mode and permissions. The bridge wraps native `edit` and `write` through supported tool registration and never invokes nested editing tools.
+- The bridge uses the public `createEditToolDefinition` and `createWriteToolDefinition` APIs. Pi owns path normalization, replacement matching and per-file serialization. The bridge delays filesystem writes for approval; it does not patch npm packages or maintain a second editing algorithm. Re-run parity and manual approval tests before upgrading Pi.
 - The plugin's `ide_connected`/Reject handling includes Claude-specific terminal focus behavior. With an external Pi terminal, focus may stay in PyCharm or move to an IDE terminal; no iTerm2 focus guarantee. Multiple Claude/Pi clients can coexist at transport level but plugin terminal focus heuristics are Claude-specific.
 
 ## Automated tests
 
 ```sh
 npm ci
-node scripts/patch-hashline.mjs
 npm ci --prefix extensions/jetbrains-ide --omit=peer --ignore-scripts
 npm test --prefix extensions/jetbrains-ide
+npm run typecheck --prefix extensions/jetbrains-ide
 ```
 
-Tests use Node's built-in runner, fake sockets and temporary fixtures; no PyCharm needed. Actual installed hashline tools run in one shared module graph via `jiti`, with isolated session/config state. Coverage includes transport/auth/discovery, registration/modes, every mutation gate, inert built-in write previews, real hashline preview-to-commit parity, BOM/CRLF/mixed endings, combined batches/opposite insert pairs, source dependencies, moves, undo/stale history, rejection/cancellation and fail-closed adapter behavior.
+Tests use Node's built-in runner, fake sockets and temporary fixtures; no PyCharm is required. Native tool tests compare reviewed execution against unmodified Pi definitions, including results and BOM/CRLF/mixed-ending bytes. Coverage includes transport/auth/discovery, registration/modes, multi-replacement edits, parallel same-file calls, rejection without creating directories, stale files, edited proposals, invalid inputs, unsafe paths, late symlink/inode replacement, tool ownership conflicts, unsupported Pi versions and cancellation. A real SDK session verifies argument preparation, validation and permission hooks. Strict TypeScript checks cover the extension and tests.
 
-Current automated validation: **34 tests pass**, strict TypeScript checks pass, and a clean disposable `PI_DIR` installation plus doctor and Pi RPC-mode extension-load smoke test pass. The native transport handshake/tabs/diagnostics were previously verified against live plugin 0.1.14-beta; automated approval tests use simulated IDE decisions. The user subsequently confirmed the live integration works.
-
-Strict TypeScript checks cover extension/tests and patched adapter sources. Use the following checklist for per-tool acceptance checks and regression testing after upgrades. A successful handshake alone does not prove native UI behavior.
+Automated approval tests simulate IDE decisions. The previous bridge's handshake/tabs/diagnostics and live UI were verified against plugin 0.1.14-beta; the migrated native editing flow still needs the manual Apply/Reject checks below.
 
 ## Manual integration acceptance test
 
 1. Open a **disposable repository** in PyCharm with the official plugin enabled. Save all buffers. Create/commit `ide-review.txt` containing `before\n`, plus a second file for transfer tests. Keep Claude Code closed initially.
 2. Run the installer, restart Pi in an external terminal from that repository, then `/ide`, `/ide status`, `/edit-mode`. Verify the matching workspace and **review** default. Repeat discovery with two projects open.
 3. Select text in PyCharm; ask for `ide_context` selection/tabs/diagnostics. Verify no unsolicited editor context per turn.
-4. Ask for a normal edit using `read` then `replace` (do **not** request `ide_diff`). The native two-pane diff must appear while disk remains `before`. Click **Reject**; disk must remain unchanged and no undo record should appear. Repeat and close the tab; expect rejection.
-5. Repeat and click **Apply** without modifying the proposed side. Verify the original `replace` ran, disk and `git diff` match the proposal, fresh anchors work, and normal undo restores the original. Repeat with `write`, `replace_within`, `insert`, `copy`, `move`, and `undo_last_change`.
-6. Request two disjoint same-file replace/insert calls in one assistant message. Verify one combined proposal is shown before any staging/write and Apply yields one normal batch commit/undo. Reject the batch; no member may write.
-7. Request a cross-file move. Verify both diffs are reviewed before either file changes. Reject the second diff; neither file may change. Repeat and accept both. Undo both files using normal hashline undo.
-8. `/edit-mode auto`: repeat ordinary edits; they must execute without connecting/review. `/edit-mode review`: the next edit must review again. While waiting, `/edit-mode auto` or `/ide disconnect` must cancel/block the pending call, not apply it. Quit PyCharm during review; disk must remain unchanged and old proposals must not replay after reconnect.
-9. Edit the file (or a copy source's interior) on disk during review, then Apply: expect a concurrent-change block preserving that external change. Modify the proposed side in the IDE and Apply: expect a block, not an unreviewed replacement tool call. Test a new `write` path whose parents do not yet exist: rejecting must not create directories.
-10. Enable `pi-code` Plan Mode and verify its permissions still apply in both edit modes. Optionally run Claude Code alongside Pi and check terminal focus behavior. Disconnect/reload/exit Pi and check cleanup.
+4. Ask for a normal edit using `read` then `edit` (do **not** request `ide_diff`). Verify the native two-pane diff appears while disk remains unchanged. Click **Reject**; disk must remain unchanged. Repeat and close the tab; expect rejection.
+5. Repeat and click **Apply** without modifying the proposed side. Verify disk and `git diff` match the proposal. Repeat with `write`, including a new nested path: rejecting must not create parent directories. Restore fixtures through Git when needed; there is no hashline undo tool.
+6. Request one `edit` call containing two disjoint entries in `edits[]`. Verify one combined proposal and no partial writes on rejection. Request two separate same-file calls and verify each reviews the file state produced by the preceding accepted call.
+7. `/edit-mode auto`: repeat ordinary edits; they must execute without IDE review. `/edit-mode review`: the next edit must review again. While waiting, `/edit-mode auto`, `/ide disconnect` or Escape must cancel the pending review, not approve it. Quit PyCharm during review; disk must remain unchanged and old proposals must not replay after reconnect.
+8. Edit the target on disk during review, then Apply: expect a concurrent-change failure preserving that external change. Modify the proposed side in the IDE and Apply: expect failure rather than silently writing different content.
+9. Enable `pi-code` Plan Mode and verify its permissions still apply in both edit modes. Optionally run Claude Code alongside Pi and check terminal focus behavior. Disconnect/reload/exit Pi and check cleanup.
 
 Record Pi/plugin versions and actual Apply/Reject results. No credentials should appear in status, tool outputs or logs.

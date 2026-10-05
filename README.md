@@ -12,7 +12,7 @@ cd pi-plus
 ./scripts/install.sh
 ```
 
-Or, after cloning, run `./scripts/doctor.sh` to check the setup. Authenticate your model providers on the new machine using Pi's normal login flow; credentials are intentionally not included or copied. If Pi is not installed, the installer installs Pi 1.0.2.
+Or, after cloning, run `./scripts/doctor.sh` to check the setup. Authenticate your model providers on the new machine using Pi's normal login flow; credentials are intentionally not included or copied. The installer requires Pi 1.0.2 and installs it when absent; other existing versions are refused before managed files are changed.
 
 ## What is included
 
@@ -25,7 +25,7 @@ Or, after cloning, run `./scripts/doctor.sh` to check the setup. Authenticate yo
 - `scripts/update.sh`: fast-forward pulls this checkout, then reinstalls it.
 - `scripts/doctor.sh`: validates the local install.
 
-The installer applies a version/content-guarded read-only preview adapter to pinned `pi-hashline-edit-pro` **5.1.0**. Normal editing tools wait for PyCharm Apply/Reject before execution; no `ide_diff` opt-in is needed. Review mode blocks mutations if no matching IDE/adapter is available. Use `/edit-mode auto` for terminal-only editing. See the bridge README for limitations and manual native-UI acceptance tests.
+The JetBrains bridge uses Pi's supported built-in `edit` and `write` definitions with filesystem hooks for native approval before writing. No third-party editing extension or dependency patch is required. Review mode blocks edits if no matching IDE is available. Use `/edit-mode auto` for terminal-only editing. See the bridge README for limitations and manual native-UI acceptance tests.
 
 The settings and model config are managed files and will be replaced by `install.sh` (the existing versions are backed up under `~/.pi/agent/backups/`). Extension files are copied into the Pi agent directory; files not tracked here are left untouched. `PI_DIR` can be set to use a different Pi data root.
 
@@ -46,4 +46,3 @@ This repository does **not** contain `auth.json`, `mcp-auth.json`, model API key
 ## GitHub
 
 Repository: <https://github.com/gcuder/pi-plus>
-test

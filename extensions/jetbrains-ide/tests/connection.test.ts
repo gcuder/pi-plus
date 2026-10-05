@@ -103,3 +103,17 @@ test("wrong protocol/server handshake fails closed", async () => {
   const opening = ide.connect({ port: 12345, pid: 1, workspaceFolders: [], ideName: "PyCharm", authToken: "test-only-token" }, () => s);
   s.open(); await assert.rejects(opening, /Unsupported/); assert.equal(ide.connection.connected, false);
 });
+
+test("abort during connection upgrade or MCP handshake closes the pending transport", async () => {
+  for (const stage of ["upgrade", "handshake"]) {
+    const ide = new IdeProtocol(), s = new FakeSocket(), controller = new AbortController();
+    let initialized!: () => void;
+    const ready = new Promise<void>(resolve => { initialized = resolve; });
+    s.respond = message => { if (message.method === "initialize") initialized(); };
+    const opening = ide.connect({ port: 12345, pid: 1, workspaceFolders: [], ideName: "PyCharm", authToken: "test-only-token" }, () => s, controller.signal);
+    const rejected = assert.rejects(opening, /disconnected|cancelled/);
+    if (stage === "handshake") { s.open(); await ready; }
+    controller.abort(); await rejected;
+    assert.equal(s.readyState, 3); assert.equal(ide.connection.connected, false);
+  }
+});

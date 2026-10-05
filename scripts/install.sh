@@ -11,13 +11,13 @@ fail() { printf '\033[1;31m[pi-plus] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 command -v node >/dev/null 2>&1 || fail "Node.js is required. Install Node.js 22.19 or newer, then rerun this script."
 command -v npm >/dev/null 2>&1 || fail "npm is required. Install Node.js 22.19 or newer, then rerun this script."
-command -v patch >/dev/null 2>&1 || fail "The patch utility is required for the audited hashline preview adapter."
 node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 19)) process.exit(1)' || fail "Pi Plus requires Node.js 22.19 or newer."
 
 if ! command -v pi >/dev/null 2>&1; then
   info "Installing Pi coding agent..."
   npm install --global @earendil-works/pi-coding-agent@1.0.2
 fi
+[[ "$(pi --version)" == "1.0.2" ]] || fail "Pi Plus IDE review requires Pi 1.0.2. Install that version before replacing managed files."
 
 mkdir -p "$PI_AGENT_DIR/extensions" "$PI_AGENT_DIR/skills" "$PI_AGENT_DIR/npm"
 
@@ -35,6 +35,8 @@ cp "$REPO_DIR/config/models.json" "$PI_AGENT_DIR/models.json"
 cp "$REPO_DIR"/extensions/*.ts "$PI_AGENT_DIR/extensions/"
 IDE_EXTENSION_DIR="$PI_AGENT_DIR/extensions/jetbrains-ide"
 mkdir -p "$IDE_EXTENSION_DIR"
+# Remove the obsolete preview adapter deployed by earlier Pi+ versions.
+rm -f "$IDE_EXTENSION_DIR/preview.ts"
 cp "$REPO_DIR"/extensions/jetbrains-ide/*.ts \
   "$REPO_DIR"/extensions/jetbrains-ide/package*.json \
   "$REPO_DIR"/extensions/jetbrains-ide/README.md "$IDE_EXTENSION_DIR/"
@@ -50,8 +52,6 @@ fi
 info "Installing pinned Pi packages..."
 cp "$REPO_DIR/package.json" "$REPO_DIR/package-lock.json" "$PI_AGENT_DIR/npm/"
 (cd "$PI_AGENT_DIR/npm" && npm ci --omit=dev)
-info "Installing audited hashline pre-execution preview adapter..."
-node "$REPO_DIR/scripts/patch-hashline.mjs" "$PI_AGENT_DIR/npm/node_modules/pi-hashline-edit-pro"
 
 if [[ -n "${BACKUP_DIR:-}" && -d "$BACKUP_DIR" ]]; then
   info "Previous settings backed up to $BACKUP_DIR"
