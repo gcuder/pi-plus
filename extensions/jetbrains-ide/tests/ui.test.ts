@@ -33,15 +33,15 @@ function fixture(cwd = "/not-a-real-directory") {
   jetbrainsIde(pi);
   return { commands, shortcuts, tools, statuses, notices, ctx, emit,
     command: (args: string) => commands.get("edit-mode")!.handler(args, ctx),
-    toggle: () => shortcuts.get("alt+r")!.handler(ctx),
+    toggle: () => shortcuts.get("ctrl+q")!.handler(ctx),
   };
 }
 
 test("session starts with a persistent REVIEW indicator and no connection", async t => {
   const connect = t.mock.method(IdeProtocol.prototype, "connect", async () => assert.fail("Eager IDE connection"));
   const f = fixture();
-  assert.deepEqual([...f.shortcuts.keys()], ["alt+r"]);
-  assert.match(f.shortcuts.get("alt+r")!.description!, /Review\/Auto/);
+  assert.deepEqual([...f.shortcuts.keys()], ["ctrl+q"]);
+  assert.match(f.shortcuts.get("ctrl+q")!.description!, /Review\/Auto/);
   await f.emit("session_start");
   assert.equal(f.statuses.get("edit-mode"), "REVIEW");
   assert.equal(f.statuses.get("jetbrains-ide"), "IDE: disconnected");

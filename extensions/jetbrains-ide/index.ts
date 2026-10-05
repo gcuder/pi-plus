@@ -136,8 +136,8 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
       ctx.ui.notify(`Edit mode: ${review.editMode}${review.editMode === "review" ? " — normal editing tools wait for native IDE approval" : " — edits execute normally without IDE review"}`, "info");
     },
   });
-  // Ctrl+R is Pi's session-rename action; pi-code uses Ctrl+Alt+P for Plan Mode.
-  pi.registerShortcut("alt+r", {
+  // Ctrl+Q works without mapping macOS Option to Alt. Ctrl+R remains session rename.
+  pi.registerShortcut("ctrl+q", {
     description: "Toggle edit mode (Review/Auto)",
     handler: ctx => {
       setEditMode(review.editMode === "review" ? "auto" : "review", ctx);

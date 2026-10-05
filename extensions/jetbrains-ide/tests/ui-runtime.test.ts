@@ -70,14 +70,14 @@ async function verifyUiRuntime(t: TestContext, omp: boolean): Promise<void> {
   assert.equal(statusLine(), "REVIEW IDE: disconnected");
   assert.match(stripAnsi(terminal.output), /REVIEW IDE: disconnected/);
   const bindings = internals.keybindings.getEffectiveConfig();
-  assert.ok(!Object.values(bindings).flat().includes("alt+r"));
+  assert.ok(!Object.values(bindings).flat().includes("ctrl+q"));
   assert.ok(internals.keybindings.getKeys("app.session.rename").includes("ctrl+r"));
   const shortcuts = session.extensionRunner.getShortcuts(bindings);
-  assert.ok(shortcuts.has("alt+r")); assert.ok(shortcuts.has("ctrl+alt+p"));
+  assert.ok(shortcuts.has("ctrl+q")); assert.ok(shortcuts.has("ctrl+alt+p"));
   assert.deepEqual(session.extensionRunner.getShortcutDiagnostics(), []);
 
   terminal.output = "";
-  terminal.input!("\x1br"); // Legacy Alt+R, routed by Pi's real CustomEditor.
+  terminal.input!("\x11"); // Ctrl+Q as sent by iTerm2, routed by Pi's real CustomEditor.
   await renderTick();
   assert.equal(statusLine(), "AUTO IDE: disconnected");
   assert.match(stripAnsi(terminal.output), /AUTO IDE: disconnected/);
@@ -88,14 +88,14 @@ async function verifyUiRuntime(t: TestContext, omp: boolean): Promise<void> {
   assert.match(stripAnsi(terminal.output), /REVIEW IDE: disconnected/);
   await session.prompt("/edit-mode auto");
   assert.equal(statusLine(), "AUTO IDE: disconnected");
-  terminal.input!("\x1br"); await renderTick();
+  terminal.input!("\x11"); await renderTick();
   assert.equal(statusLine(), "REVIEW IDE: disconnected");
 
   await session.prompt("/plan");
   assert.match(statusLine(), /REVIEW IDE: disconnected.*plan/);
   const planStatus = statusLine().split("IDE: disconnected")[1];
   const planTools = session.getActiveToolNames();
-  terminal.input!("\x1br"); await renderTick();
+  terminal.input!("\x11"); await renderTick();
   assert.equal(statusLine(), `AUTO IDE: disconnected${planStatus}`);
   assert.deepEqual(session.getActiveToolNames(), planTools);
   await session.prompt("/edit-mode review");
@@ -105,6 +105,6 @@ async function verifyUiRuntime(t: TestContext, omp: boolean): Promise<void> {
 }
 
 for (const omp of [false, true]) {
-  test(`real Pi ${omp ? "OMP status UI" : "native footer"} registers Alt+R and shows edit status alongside pi-code Plan Mode`,
+  test(`real Pi ${omp ? "OMP status UI" : "native footer"} registers Ctrl+Q and shows edit status alongside pi-code Plan Mode`,
     { timeout: 15_000 }, t => verifyUiRuntime(t, omp));
 }

@@ -30,11 +30,11 @@ In Pi, with the same repository open in PyCharm:
 /ide disconnect
 ```
 
-**Alt+R** toggles Review/Auto using the same mode switch as `/edit-mode`. Ctrl+R remains Pi's session-rename shortcut; Shift+Tab remains thinking-level cycling; pi-code's Ctrl+Alt+P still controls Plan Mode.
+**Ctrl+Q** toggles Review/Auto using the same mode switch as `/edit-mode`. Ctrl+R remains Pi's session-rename shortcut; Shift+Tab remains thinking-level cycling; pi-code's Ctrl+Alt+P still controls Plan Mode.
 
 Pi's persistent extension status row shows **REVIEW** (the session default) or **AUTO**, followed by `IDE: PyCharm` when connected or `IDE: disconnected` when there is no active connection. Both the command and shortcut update it immediately. The items coexist with Plan Mode and other extension statuses, including in status-aware custom footers. Displaying status never discovers or connects to an IDE. Switching to Auto cancels pending reviews without approving them.
 
-Pi+'s `config/settings.json` enables OMP's supported `extension_statuses` secondary row. OMP's default Claude preset hides that row; other custom footers must also opt into showing extension statuses. On macOS, configure your terminal's Option key to send Alt for Alt+R.
+Pi+'s `config/settings.json` enables OMP's supported `extension_statuses` secondary row. OMP's default Claude preset hides that row; other custom footers must also opt into showing extension statuses. Ctrl+Q works in iTerm2 on macOS without changing the terminal's Option-key settings.
 
 `/ide` discovers lazily; no startup socket or background reconnect loop. Pending changes are never replayed after reconnect. Disconnect cancels pending reviews; a subsequent Review-mode mutation or explicit IDE command can reconnect. To edit without an IDE, use `/edit-mode auto`.
 
