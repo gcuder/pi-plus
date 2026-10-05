@@ -4,7 +4,8 @@ import { discover, type IdeInstance } from "./discovery.ts";
 import { IdeProtocol } from "./protocol.ts";
 import { IdeContext } from "./context.ts";
 import { EditReview } from "./review.ts";
-import { previewMutation, REJECT_EVENT } from "./preview.ts";
+import { registerReviewedEditing } from "./editing.ts";
+import { withAbort } from "./abort.ts";
 
 const textResult = (text: string, details: unknown = undefined) => ({
   content: [{ type: "text" as const, text: text.length > 24_000 ? `${text.slice(0, 24_000)}\n[IDE output truncated]` : text }], details,
@@ -17,11 +18,8 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
   let generation = 0;
   let summary: Pick<IdeInstance, "port" | "ideName" | "workspaceFolders"> | undefined;
   const context = new IdeContext();
-  const review = new EditReview({
-    preview: (event, ctx) => previewMutation(pi, event, ctx),
-    connect: ensureConnected,
-    reject: (toolCallId, reason) => pi.events.emit(REJECT_EVENT, { toolCallId, reason }),
-  });
+  const review = new EditReview(ensureConnected);
+  registerReviewedEditing(pi, review);
 
   function disconnect(): void {
     generation++;
@@ -31,12 +29,13 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
   }
 
   async function ensureConnected(ctx: ExtensionContext, port?: number): Promise<IdeProtocol> {
-    if (attempt) await attempt;
+    if (ctx.signal?.aborted) throw new Error("IDE connection cancelled");
+    if (attempt) await withAbort(attempt, ctx.signal);
     if (ide?.connection.connected && (port === undefined || summary?.port === port)) return ide;
     disconnect();
     const epoch = generation;
     attempt = (async () => {
-      const candidates = await discover(ctx.cwd);
+      const candidates = await withAbort(discover(ctx.cwd), ctx.signal);
       const selected = port === undefined ? candidates : candidates.filter(c => c.port === port);
       if (!selected.length) throw new Error("No live Claude-compatible JetBrains IDE matches this directory. Open this repository in PyCharm, enable the official Claude Code plugin, then run /ide. Use /ide list to inspect matching instances.");
       let lastError = "IDE connection failed";
@@ -56,14 +55,15 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
           ctx.ui.notify("IDE disconnected. Pending IDE requests failed; run /ide to reconnect.", "warning");
         };
         try {
-          await client.connect(instance);
-          if (epoch !== generation) { client.close(); throw new Error("IDE connection cancelled"); }
+          await client.connect(instance, undefined, ctx.signal);
+          if (epoch !== generation || ctx.signal?.aborted) { client.close(); throw new Error("IDE connection cancelled"); }
           ide = client;
           summary = { port: instance.port, ideName: instance.ideName, workspaceFolders: instance.workspaceFolders };
           ctx.ui.setStatus("jetbrains-ide", `IDE: ${instance.ideName}`);
           return;
         } catch (e) {
           client.close(); context.clear();
+          if (ctx.signal?.aborted) throw new Error("IDE connection cancelled");
           lastError = e instanceof Error ? e.message : "IDE connection failed";
         } finally { if (connecting === client) connecting = undefined; }
       }
@@ -126,9 +126,12 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
       ctx.ui.notify(`Edit mode: ${review.editMode}${review.editMode === "review" ? " — normal editing tools wait for native IDE approval" : " — edits execute normally without IDE review"}`, "info");
     },
   });
-  pi.on("tool_call", (event, ctx) => review.handle(event, ctx));
-  pi.on("tool_result", (event) => { review.finished(event.toolCallId, event.isError); });
-  pi.on("turn_end", () => { review.clearApprovals(); });
+  // Old editing extensions cannot safely participate without a supported preview.
+  pi.on("tool_call", event => {
+    if (review.editMode === "review" && ["replace", "replace_within", "insert", "copy", "move", "undo_last_change"].includes(event.toolName)) {
+      return { block: true, reason: "Unsupported editing tool in IDE Review mode. Use built-in edit or write; remove any legacy editing extension." };
+    }
+  });
   pi.on("session_start", (_event, ctx) => {
     review.cancelPending(); review.setMode("review");
     ctx.ui.setStatus("edit-mode", "Edits: review");

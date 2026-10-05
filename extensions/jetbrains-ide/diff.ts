@@ -1,27 +1,41 @@
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, realpath } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { inside } from "./discovery.ts";
 import type { IdeProtocol } from "./protocol.ts";
 
+export interface FileIdentity { dev: bigint; ino: bigint }
+export const sameFile = (a: FileIdentity, b: FileIdentity): boolean => a.dev === b.dev && a.ino === b.ino;
 export interface FileProposal {
   path: string;
   originalContent: string | undefined;
+  originalIdentity?: FileIdentity;
   proposedContent: string;
 }
 
-export async function snapshot(path: string): Promise<string | undefined> {
+export async function snapshotFile(path: string): Promise<{ content: string; identity: FileIdentity } | undefined> {
+  if (!constants.O_NOFOLLOW) throw new Error("Safe IDE review requires filesystem O_NOFOLLOW support");
   try {
-    const bytes = await readFile(path);
-    if (bytes.includes(0) || !Buffer.from(bytes.toString("utf8")).equals(bytes)) throw new Error("IDE review requires UTF-8 text files");
-    return bytes.toString("utf8");
+    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const identity = await handle.stat({ bigint: true });
+      if (!identity.isFile()) throw new Error("Review target must be a regular file");
+      const bytes = await handle.readFile();
+      if (bytes.includes(0) || !Buffer.from(bytes.toString("utf8")).equals(bytes)) throw new Error("IDE review requires UTF-8 text files");
+      return { content: bytes.toString("utf8"), identity };
+    } finally { await handle.close(); }
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
     throw e;
   }
 }
 
-async function checkedPath(path: string, cwd: string): Promise<void> {
+export async function snapshot(path: string): Promise<string | undefined> {
+  return (await snapshotFile(path))?.content;
+}
+
+export async function assertReviewTarget(path: string, cwd: string): Promise<void> {
   if (path !== resolve(path)) throw new Error("Preview provider must supply absolute file paths");
   const root = await realpath(cwd);
   // New write targets may have nonexistent parent directories. Check the nearest
@@ -52,9 +66,10 @@ async function checkedPath(path: string, cwd: string): Promise<void> {
 
 export async function assertPreviewUnchanged(files: FileProposal[], cwd: string): Promise<void> {
   for (const file of files) {
-    await checkedPath(file.path, cwd);
-    if (await snapshot(file.path) !== file.originalContent) {
-      throw new Error("File changed before/during IDE review; original tool blocked. Read fresh anchors and retry.");
+    await assertReviewTarget(file.path, cwd);
+    const current = await snapshotFile(file.path);
+    if (current?.content !== file.originalContent || file.originalIdentity && (!current || !sameFile(current.identity, file.originalIdentity))) {
+      throw new Error("File changed before/during IDE review; original tool blocked. Read the file again and retry.");
     }
   }
 }
@@ -71,9 +86,8 @@ export async function reviewEdit(ide: IdeProtocol, file: FileProposal, signal?: 
     const decision = await ide.openDiff(file.path, file.proposedContent, tab, signal);
     if (!decision.accepted) return false;
     if (signal?.aborted || !ide.connection.connected) throw new Error("IDE review interrupted; original tool blocked");
-    // The original anchor-based operation must remain the source of truth. The
-    // plugin makes the proposed side editable, but translating arbitrary UI edits
-    // back to anchors would change semantics/undo. Never silently ignore UI edits.
+    // The native tool's proposal remains the source of truth. Arbitrary edits in
+    // the IDE would change the requested operation, so they require a new call.
     if (normalized(decision.contents) !== normalized(file.proposedContent)) {
       throw new Error("Proposal was edited in PyCharm; original tool blocked. Reject and ask Pi to propose that change instead.");
     }

@@ -20,11 +20,8 @@ jobs:
         run: bash -n scripts/install.sh scripts/update.sh scripts/doctor.sh
       - name: Validate locked dependencies
         run: npm ci
-      - name: Install audited hashline preview adapter (idempotent)
-        run: |
-          node scripts/patch-hashline.mjs
-          node scripts/patch-hashline.mjs node_modules/pi-hashline-edit-pro --check
       - name: Test JetBrains IDE extension
         run: |
           npm ci --prefix extensions/jetbrains-ide --omit=peer --ignore-scripts
           npm test --prefix extensions/jetbrains-ide
+          npm run typecheck --prefix extensions/jetbrains-ide
