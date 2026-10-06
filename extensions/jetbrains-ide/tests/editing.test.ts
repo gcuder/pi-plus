@@ -122,6 +122,27 @@ test("mode changes cancel edits waiting in the native file queue and Auto skips 
   assert.equal(await readFile(path, "utf8"), "auto write");
 });
 
+test("Auto delegates directly without proposal validation or IDE work", async t => {
+  const { cwd, path, ctx, tools } = await fixture(t);
+  const review = new EditReview({
+    connect: async () => assert.fail("Auto tried to connect"),
+    terminal: async () => assert.fail("Auto opened CLI review"),
+  });
+  registerReviewedEditing({ registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool), on: () => {} } as unknown as ExtensionAPI, review);
+  review.setMode("auto");
+  await symlink(path, join(cwd, "link.txt"));
+  const input = { path: "link.txt", content: "\0" };
+  const native = createWriteToolDefinition(cwd);
+  const result = await tools.get("write")!.execute("auto", input, undefined, undefined, ctx);
+  assert.equal(await readFile(path, "utf8"), input.content);
+  assert.deepEqual(result, await native.execute("native", input, undefined, undefined, ctx));
+  await writeFile(path, "before\n");
+  const editInput = { ...edits(), path: "link.txt" };
+  const edited = await tools.get("edit")!.execute("auto-edit", editInput, undefined, undefined, ctx);
+  await writeFile(path, "before\n");
+  assert.deepEqual(edited, await createEditToolDefinition(cwd).execute("native", editInput, undefined, undefined, ctx));
+});
+
 test("Review rejects symlinks, outside paths, binary and invalid UTF-8 before contacting IDE", async t => {
   const { cwd, path, ide, execute } = await fixture(t);
   ide.openDiff = async () => assert.fail("Unsafe target reached IDE");

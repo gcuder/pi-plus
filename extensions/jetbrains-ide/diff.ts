@@ -15,14 +15,14 @@ export interface FileProposal {
 }
 
 export async function snapshotFile(path: string): Promise<{ content: string; identity: FileIdentity } | undefined> {
-  if (!constants.O_NOFOLLOW) throw new Error("Safe IDE review requires filesystem O_NOFOLLOW support");
+  if (!constants.O_NOFOLLOW) throw new Error("Safe edit review requires filesystem O_NOFOLLOW support");
   try {
     const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       const identity = await handle.stat({ bigint: true });
       if (!identity.isFile()) throw new Error("Review target must be a regular file");
       const bytes = await handle.readFile();
-      if (bytes.includes(0) || !Buffer.from(bytes.toString("utf8")).equals(bytes)) throw new Error("IDE review requires UTF-8 text files");
+      if (bytes.includes(0) || !Buffer.from(bytes.toString("utf8")).equals(bytes)) throw new Error("Edit review requires UTF-8 text files");
       return { content: bytes.toString("utf8"), identity };
     } finally { await handle.close(); }
   } catch (e) {
@@ -69,28 +69,35 @@ export async function assertPreviewUnchanged(files: FileProposal[], cwd: string)
     await assertReviewTarget(file.path, cwd);
     const current = await snapshotFile(file.path);
     if (current?.content !== file.originalContent || file.originalIdentity && (!current || !sameFile(current.identity, file.originalIdentity))) {
-      throw new Error("File changed before/during IDE review; original tool blocked. Read the file again and retry.");
+      throw new Error("File changed before/during edit review; original tool blocked. Read the file again and retry.");
     }
   }
 }
 
 const normalized = (text: string) => text.replace(/\r\n|\r/g, "\n");
 
-// Internal approval primitive only. It NEVER writes, calls another editing tool,
-// or rolls back anything. The tool_call handler decides whether execution proceeds.
-export async function reviewEdit(ide: IdeProtocol, file: FileProposal, signal?: AbortSignal): Promise<boolean> {
-  if (file.proposedContent.includes("\0") || Buffer.from(file.proposedContent).toString("utf8") !== file.proposedContent) throw new Error("IDE review requires a valid UTF-8 text proposal");
+export function assertReviewProposal(file: FileProposal): void {
+  if (file.proposedContent.includes("\0") || Buffer.from(file.proposedContent).toString("utf8") !== file.proposedContent) throw new Error("Edit review requires a valid UTF-8 text proposal");
   if (Buffer.byteLength(file.proposedContent) > 2 * 1024 * 1024) throw new Error("Review proposal exceeds 2 MiB");
+}
+
+export class ModifiedIdeProposalError extends Error {}
+
+// Approval only: the native tool remains responsible for committing the proposal.
+export async function reviewEdit(ide: IdeProtocol, file: FileProposal, signal?: AbortSignal,
+  onDecision?: (accepted: boolean) => void): Promise<boolean> {
+  assertReviewProposal(file);
   const tab = `Pi review: ${basename(file.path)} (${randomUUID()})`;
   try {
     const decision = await ide.openDiff(file.path, file.proposedContent, tab, signal);
-    if (!decision.accepted) return false;
     if (signal?.aborted || !ide.connection.connected) throw new Error("IDE review interrupted; original tool blocked");
+    if (!decision.accepted) { onDecision?.(false); return false; }
     // The native tool's proposal remains the source of truth. Arbitrary edits in
     // the IDE would change the requested operation, so they require a new call.
     if (normalized(decision.contents) !== normalized(file.proposedContent)) {
-      throw new Error("Proposal was edited in PyCharm; original tool blocked. Reject and ask Pi to propose that change instead.");
+      throw new ModifiedIdeProposalError("Proposal was edited in PyCharm; original tool blocked. Reject and ask Pi to propose that change instead.");
     }
+    onDecision?.(true);
     return true;
   } finally {
     await ide.closeTab(tab).catch(() => {});

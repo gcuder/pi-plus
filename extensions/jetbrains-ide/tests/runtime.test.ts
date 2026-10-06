@@ -68,6 +68,20 @@ test("real Pi runtime retains argument preparation, validation and permission ho
   input = { path: "file.txt", content: "written\n" };
   await run("write"); assert.equal(await readFile(path, "utf8"), "written\n"); assert.equal(reviews, 2);
 
+  review.setMode("auto"); permitted = false;
+  for (const tool of ["edit", "write"]) {
+    input = tool === "edit" ? { path: "file.txt", edits: [{ oldText: "written", newText: "auto" }] }
+      : { path: "file.txt", content: "auto\n" };
+    assert.match(JSON.stringify(await run(tool)), /Permission denied/);
+  }
+  assert.equal(await readFile(path, "utf8"), "written\n"); assert.equal(reviews, 2);
+  permitted = true;
+  input = { path: "file.txt", edits: [{ oldText: "written", newText: "auto" }] };
+  await run("edit"); assert.equal(await readFile(path, "utf8"), "auto\n");
+  input = { path: "file.txt", content: "written\n" };
+  await run("write"); assert.equal(reviews, 2);
+  review.setMode("review");
+
   const conflictingLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager,
     noExtensions: true, noSkills: true, noThemes: true, noPromptTemplates: true,
     extensionFactories: [pi => {

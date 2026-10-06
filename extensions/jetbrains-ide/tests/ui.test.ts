@@ -16,7 +16,8 @@ function fixture(cwd = "/not-a-real-directory") {
   const tools = new Map<string, ToolDefinition>();
   const handlers = new Map<string, ((...args: any[]) => any)[]>();
   const statuses = new Map<string, string>(), notices: string[] = [];
-  const ctx = { cwd, hasUI: true, mode: "tui", ui: {
+  // This harness stubs status APIs only. ui-runtime.test.ts exercises terminal controls.
+  const ctx = { cwd, hasUI: false, mode: "print", ui: {
     notify: (text: string) => notices.push(text),
     setStatus: (key: string, text: string | undefined) => {
       if (text === undefined) statuses.delete(key); else statuses.set(key, text);
@@ -37,14 +38,14 @@ function fixture(cwd = "/not-a-real-directory") {
   };
 }
 
-test("session starts with a persistent REVIEW indicator and no connection", async t => {
+test("session starts with separate edit mode and IDE indicators and no connection", async t => {
   const connect = t.mock.method(IdeProtocol.prototype, "connect", async () => assert.fail("Eager IDE connection"));
   const f = fixture();
   assert.deepEqual([...f.shortcuts.keys()], ["ctrl+q"]);
   assert.match(f.shortcuts.get("ctrl+q")!.description!, /Review\/Auto/);
   await f.emit("session_start");
-  assert.equal(f.statuses.get("edit-mode"), "REVIEW");
-  assert.equal(f.statuses.get("jetbrains-ide"), "IDE: disconnected");
+  assert.equal(f.statuses.get("edit-mode"), "[Edits: Review]");
+  assert.equal(f.statuses.get("jetbrains-ide"), "[IDE: Not connected]");
   assert.deepEqual(f.notices, []);
   await f.toggle(); await f.command("review"); await f.command("");
   await f.commands.get("ide")!.handler("status", f.ctx);
@@ -55,11 +56,11 @@ test("session starts with a persistent REVIEW indicator and no connection", asyn
 test("shortcut toggles Review to Auto and Auto to Review, updating status immediately", async () => {
   const f = fixture(); await f.emit("session_start");
   await f.toggle();
-  assert.equal(f.statuses.get("edit-mode"), "AUTO");
+  assert.equal(f.statuses.get("edit-mode"), "[Edits: Auto]");
   assert.equal(f.notices.at(-1), "Edit mode: AUTO");
   await f.command(""); assert.match(f.notices.at(-1)!, /Edit mode: auto/);
   await f.toggle();
-  assert.equal(f.statuses.get("edit-mode"), "REVIEW");
+  assert.equal(f.statuses.get("edit-mode"), "[Edits: Review]");
   assert.equal(f.notices.at(-1), "Edit mode: REVIEW");
   await f.command(""); assert.match(f.notices.at(-1)!, /Edit mode: review/);
 });
@@ -67,14 +68,14 @@ test("shortcut toggles Review to Auto and Auto to Review, updating status immedi
 test("command and shortcut share policy and status without replacing Plan Mode status", async () => {
   const f = fixture(); await f.emit("session_start");
   f.statuses.set("plan-mode", "PLAN");
-  await f.command("auto"); assert.equal(f.statuses.get("edit-mode"), "AUTO");
-  await f.toggle(); assert.equal(f.statuses.get("edit-mode"), "REVIEW");
+  await f.command("auto"); assert.equal(f.statuses.get("edit-mode"), "[Edits: Auto]");
+  await f.toggle(); assert.equal(f.statuses.get("edit-mode"), "[Edits: Review]");
   await f.command("auto"); await f.command("review");
-  assert.equal(f.statuses.get("edit-mode"), "REVIEW");
-  await f.toggle(); assert.equal(f.statuses.get("edit-mode"), "AUTO");
+  assert.equal(f.statuses.get("edit-mode"), "[Edits: Review]");
+  await f.toggle(); assert.equal(f.statuses.get("edit-mode"), "[Edits: Auto]");
   const before = new Map(f.statuses);
   await f.command("invalid"); assert.deepEqual(f.statuses, before);
-  await f.emit("session_start"); assert.equal(f.statuses.get("edit-mode"), "REVIEW");
+  await f.emit("session_start"); assert.equal(f.statuses.get("edit-mode"), "[Edits: Review]");
   assert.equal(f.statuses.get("plan-mode"), "PLAN");
 });
 
@@ -111,9 +112,13 @@ test("shortcut switching to Auto cancels active and queued native reviews, never
     if (message.method === "tools/list") reply({ tools: [
       { name: "openDiff", inputSchema: { properties: { old_file_path: {}, new_file_path: {}, new_file_contents: {}, tab_name: {} } } },
       { name: "close_tab" },
+      { name: "get_all_opened_file_paths" },
     ] });
     if (message.method === "tools/call" && message.params.name === "openDiff") { opened++; started(); }
     if (message.method === "tools/call" && message.params.name === "close_tab") reply({ content: [] });
+    if (message.method === "tools/call" && message.params.name === "get_all_opened_file_paths") {
+      reply({ content: [{ type: "text", text: join(cwd, "file.txt") }] });
+    }
     if (message.method === "notifications/cancelled") { cancelled++; cancellationReceived(); }
   }));
   const f = fixture(cwd); await f.emit("session_start");
@@ -127,20 +132,26 @@ test("shortcut switching to Auto cancels active and queued native reviews, never
   const first = edit.execute("first", { path, edits: [{ oldText: "before", newText: "after" }] }, undefined, undefined, f.ctx);
   const firstRejected = assert.rejects(first, /cancelled|aborted/i);
   await ready;
-  assert.equal(f.statuses.get("jetbrains-ide"), "IDE: PyCharm");
+  assert.equal(f.statuses.get("jetbrains-ide"), "[IDE: PyCharm]");
   const second = edit.execute("second", { path, edits: [{ oldText: "before", newText: "queued" }] }, undefined, undefined, f.ctx);
   const secondRejected = assert.rejects(second, /cancelled|aborted/i);
   await f.toggle();
-  assert.equal(f.statuses.get("edit-mode"), "AUTO");
+  assert.equal(f.statuses.get("edit-mode"), "[Edits: Auto]");
+  assert.equal(f.statuses.get("jetbrains-ide"), "[IDE: PyCharm (context only)]");
   await Promise.all([firstRejected, secondRejected]);
   assert.equal(await readFile(path, "utf8"), "before\n");
   assert.equal(opened, 1);
   await cancellation;
   assert.equal(cancelled, 1);
+  const connectedBeforeAuto = connections;
   await edit.execute("auto", { path, edits: [{ oldText: "before", newText: "auto" }] }, undefined, undefined, f.ctx);
+  await f.tools.get("write")!.execute("auto-write", { path, content: "auto\n" }, undefined, undefined, f.ctx);
   assert.equal(await readFile(path, "utf8"), "auto\n");
-  assert.equal(opened, 1);
+  assert.equal(opened, 1); assert.equal(connections, connectedBeforeAuto);
+  const tabs = await f.tools.get("ide_context")!.execute("context", { kind: "tabs" }, undefined, undefined, f.ctx);
+  assert.match(tabs.content[0].type === "text" ? tabs.content[0].text : "", /file.txt/);
+  assert.equal(f.statuses.get("jetbrains-ide"), "[IDE: PyCharm (context only)]");
   await f.commands.get("ide")!.handler("disconnect", f.ctx);
-  assert.equal(f.statuses.get("jetbrains-ide"), "IDE: disconnected");
-  assert.equal(f.statuses.get("edit-mode"), "AUTO");
+  assert.equal(f.statuses.get("jetbrains-ide"), "[IDE: Not connected]");
+  assert.equal(f.statuses.get("edit-mode"), "[Edits: Auto]");
 });
