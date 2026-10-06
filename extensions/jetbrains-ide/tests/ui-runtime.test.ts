@@ -1,6 +1,6 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
@@ -31,8 +31,12 @@ class TestTerminal implements Terminal {
 
 const stripAnsi = (text: string) => text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 const renderTick = () => new Promise(resolve => setTimeout(resolve, 30));
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let i = 0; i < 100; i++) { if (predicate()) return; await renderTick(); }
+  assert.fail("Timed out waiting for terminal review");
+}
 
-async function verifyUiRuntime(t: TestContext, omp: boolean): Promise<void> {
+async function verifyUiRuntime(t: TestContext, omp: boolean, tuiMode: "regular" | "fullscreen"): Promise<void> {
   const cwd = await mkdtemp(join(tmpdir(), "pi-edit-ui-runtime-")), agentDir = join(cwd, "agent");
   const home = process.env.HOME, piDir = process.env.PI_CODING_AGENT_DIR;
   process.env.HOME = cwd; process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -59,16 +63,15 @@ async function verifyUiRuntime(t: TestContext, omp: boolean): Promise<void> {
   const runtime = new AgentSessionRuntime(session, services, async () => assert.fail("Unexpected session replacement"));
   t.after(() => runtime.dispose());
   const terminal = new TestTerminal();
-  const mode = new InteractiveMode(runtime, { terminal, tuiMode: "regular" });
+  const mode = new InteractiveMode(runtime, { terminal, tuiMode });
   t.after(() => mode.stop());
-  await mode.init();
-  await renderTick();
+  await mode.init(); await renderTick();
 
-  // Inspect Pi's actual footer and effective bindings; nothing in the extension replaces either.
   const internals = mode as unknown as { footer: FooterComponent; keybindings: KeybindingsManager };
   const statusLine = () => stripAnsi(internals.footer.render(120).at(-1)!);
-  assert.equal(statusLine(), "REVIEW IDE: disconnected");
-  assert.match(stripAnsi(terminal.output), /REVIEW IDE: disconnected/);
+  const reviewStatus = "[Edits: Review] [IDE: Not connected]", autoStatus = "[Edits: Auto] [IDE: Not connected]";
+  assert.equal(statusLine(), reviewStatus);
+  assert.ok(stripAnsi(terminal.output).includes(reviewStatus));
   const bindings = internals.keybindings.getEffectiveConfig();
   assert.ok(!Object.values(bindings).flat().includes("ctrl+q"));
   assert.ok(internals.keybindings.getKeys("app.session.rename").includes("ctrl+r"));
@@ -77,34 +80,76 @@ async function verifyUiRuntime(t: TestContext, omp: boolean): Promise<void> {
   assert.deepEqual(session.extensionRunner.getShortcutDiagnostics(), []);
 
   terminal.output = "";
-  terminal.input!("\x11"); // Ctrl+Q as sent by iTerm2, routed by Pi's real CustomEditor.
-  await renderTick();
-  assert.equal(statusLine(), "AUTO IDE: disconnected");
-  assert.match(stripAnsi(terminal.output), /AUTO IDE: disconnected/);
-  terminal.output = "";
-  await session.prompt("/edit-mode review");
-  assert.equal(statusLine(), "REVIEW IDE: disconnected");
-  await renderTick();
-  assert.match(stripAnsi(terminal.output), /REVIEW IDE: disconnected/);
-  await session.prompt("/edit-mode auto");
-  assert.equal(statusLine(), "AUTO IDE: disconnected");
   terminal.input!("\x11"); await renderTick();
-  assert.equal(statusLine(), "REVIEW IDE: disconnected");
+  assert.equal(statusLine(), autoStatus);
+  assert.ok(stripAnsi(terminal.output).includes(autoStatus));
+  await session.prompt("/edit-mode review"); assert.equal(statusLine(), reviewStatus);
+  await session.prompt("/edit-mode auto"); assert.equal(statusLine(), autoStatus);
+  terminal.input!("\x11"); await renderTick(); assert.equal(statusLine(), reviewStatus);
 
   await session.prompt("/plan");
-  assert.match(statusLine(), /REVIEW IDE: disconnected.*plan/);
-  const planStatus = statusLine().split("IDE: disconnected")[1];
-  const planTools = session.getActiveToolNames();
+  assert.ok(statusLine().startsWith(reviewStatus)); assert.match(statusLine(), /plan/);
+  const planStatus = statusLine().slice(reviewStatus.length), planTools = session.getActiveToolNames();
   terminal.input!("\x11"); await renderTick();
-  assert.equal(statusLine(), `AUTO IDE: disconnected${planStatus}`);
+  assert.equal(statusLine(), `${autoStatus}${planStatus}`);
   assert.deepEqual(session.getActiveToolNames(), planTools);
   await session.prompt("/edit-mode review");
-  assert.equal(statusLine(), `REVIEW IDE: disconnected${planStatus}`);
+  assert.equal(statusLine(), `${reviewStatus}${planStatus}`);
   assert.deepEqual(session.getActiveToolNames(), planTools);
-  assert.equal(connect.mock.callCount(), 0);
+  await session.prompt("/plan");
+
+  // Execute the registered wrappers against Pi's real UI without a model or IDE.
+  const path = join(cwd, "file.txt"); await writeFile(path, "before\n");
+  const ctx = session.extensionRunner.createToolContext("ui-test", undefined);
+  const edit = session.getToolDefinition("edit")!, write = session.getToolDefinition("write")!;
+  const execute = () => edit.execute("ui-test", { path, edits: [{ oldText: "before", newText: "after" }] }, undefined, undefined, ctx);
+  const reviewVisible = () => stripAnsi(terminal.output).includes("Accept and switch to Auto");
+  ctx.ui.setEditorText("unsent draft"); terminal.output = "";
+  const declined = execute(), declinedResult = assert.rejects(declined, /User feedback: Keep the old API/);
+  await waitFor(reviewVisible);
+  assert.equal(await readFile(path, "utf8"), "before\n");
+  assert.match(stripAnsi(terminal.output), /before/); assert.match(stripAnsi(terminal.output), /after/);
+  terminal.input!("\x1b[B"); terminal.input!("\t"); terminal.input!("Keep the old API"); terminal.input!("\r");
+  await declinedResult;
+  assert.equal(await readFile(path, "utf8"), "before\n");
+  assert.equal(ctx.ui.getEditorText(), "unsent draft"); assert.equal(statusLine(), reviewStatus);
+
+  terminal.output = "";
+  const newFile = write.execute("new-file", { path: join(cwd, "new/sub/file.txt"), content: "new content\n" }, undefined, undefined, ctx);
+  const newFileRejected = assert.rejects(newFile, /User rejected/);
+  await waitFor(reviewVisible);
+  terminal.input!("\x1b[B"); terminal.input!("\r"); await newFileRejected;
+  await assert.rejects(access(join(cwd, "new")), /ENOENT/);
+
+  terminal.output = "";
+  const accepted = execute(); await waitFor(reviewVisible); terminal.input!("\r"); await accepted;
+  assert.equal(await readFile(path, "utf8"), "after\n"); assert.equal(statusLine(), reviewStatus);
+
+  terminal.output = "";
+  const written = write.execute("ui-write", { path, content: "written\n" }, undefined, undefined, ctx);
+  await waitFor(reviewVisible);
+  assert.match(stripAnsi(terminal.output), /after/); assert.match(stripAnsi(terminal.output), /written/);
+  terminal.input!("\r"); await written;
+  assert.equal(await readFile(path, "utf8"), "written\n");
+
+  await writeFile(path, "before\n"); terminal.output = "";
+  const acceptedAuto = execute(); await waitFor(reviewVisible);
+  terminal.input!("\x1b[B"); terminal.input!("\x1b[B"); terminal.input!("\r"); await acceptedAuto;
+  assert.equal(await readFile(path, "utf8"), "after\n"); assert.equal(statusLine(), autoStatus);
+  terminal.output = "";
+  await write.execute("auto-write", { path, content: "auto\n" }, undefined, undefined, ctx);
+  assert.equal(await readFile(path, "utf8"), "auto\n"); assert.equal(reviewVisible(), false);
+
+  await session.prompt("/edit-mode review"); await writeFile(path, "before\n"); terminal.output = "";
+  const cancelled = execute(), cancelledResult = assert.rejects(cancelled, /cancelled|aborted/);
+  await waitFor(reviewVisible); terminal.input!("\x11"); await cancelledResult;
+  assert.equal(await readFile(path, "utf8"), "before\n"); assert.equal(statusLine(), autoStatus);
+  assert.equal(ctx.ui.getEditorText(), "unsent draft"); assert.equal(connect.mock.callCount(), 0);
 }
 
 for (const omp of [false, true]) {
-  test(`real Pi ${omp ? "OMP status UI" : "native footer"} registers Ctrl+Q and shows edit status alongside pi-code Plan Mode`,
-    { timeout: 15_000 }, t => verifyUiRuntime(t, omp));
+  for (const tuiMode of ["regular", "fullscreen"] as const) {
+    test(`real Pi ${tuiMode} ${omp ? "OMP status UI" : "native footer"} supports CLI review without an IDE and keeps edit mode separate from Plan Mode`,
+      { timeout: 20_000 }, t => verifyUiRuntime(t, omp, tuiMode));
+  }
 }

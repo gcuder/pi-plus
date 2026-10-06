@@ -6,10 +6,13 @@ import { IdeContext } from "./context.ts";
 import { EditReview, type EditMode } from "./review.ts";
 import { registerReviewedEditing } from "./editing.ts";
 import { withAbort } from "./abort.ts";
+import { reviewInTerminal } from "./terminal-review.ts";
 
 const textResult = (text: string, details: unknown = undefined) => ({
   content: [{ type: "text" as const, text: text.length > 24_000 ? `${text.slice(0, 24_000)}\n[IDE output truncated]` : text }], details,
 });
+
+class NoMatchingIdeError extends Error {}
 
 export default function jetbrainsIde(pi: ExtensionAPI): void {
   let ide: IdeProtocol | undefined;
@@ -18,24 +21,43 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
   let generation = 0;
   let summary: Pick<IdeInstance, "port" | "ideName" | "workspaceFolders"> | undefined;
   const context = new IdeContext();
-  const review = new EditReview(ensureConnected);
+  const review = new EditReview({
+    connect: async ctx => {
+      try { return await ensureConnected(ctx); }
+      catch (error) { if (error instanceof NoMatchingIdeError) return undefined; throw error; }
+    },
+    terminal: reviewInTerminal,
+    onModeChange: (_mode, ctx) => publishEditMode(ctx),
+    onToggleMode: ctx => toggleEditMode(ctx),
+  });
   registerReviewedEditing(pi, review);
+
+  function publishEditMode(ctx: ExtensionContext): void {
+    ctx.ui.setStatus("edit-mode", `[Edits: ${review.editMode === "review" ? "Review" : "Auto"}]`);
+    updateIdeStatus(ctx);
+  }
 
   function setEditMode(mode: EditMode, ctx: ExtensionContext): void {
     review.setMode(mode);
-    ctx.ui.setStatus("edit-mode", review.editMode.toUpperCase());
+    publishEditMode(ctx);
+  }
+
+  function toggleEditMode(ctx: ExtensionContext): void {
+    setEditMode(review.editMode === "review" ? "auto" : "review", ctx);
+    ctx.ui.notify(`Edit mode: ${review.editMode.toUpperCase()}`, "info");
   }
 
   function updateIdeStatus(ctx: ExtensionContext): void {
     ctx.ui.setStatus("jetbrains-ide", ide?.connection.connected && summary
-      ? `IDE: ${summary.ideName}` : "IDE: disconnected");
+      ? `[IDE: ${summary.ideName}${review.editMode === "auto" ? " (context only)" : ""}]` : "[IDE: Not connected]");
   }
 
   function disconnect(): void {
     generation++;
-    connecting?.close(); connecting = undefined;
-    ide?.close(); ide = undefined;
+    const pending = connecting, active = ide;
+    connecting = undefined; ide = undefined;
     summary = undefined; context.clear();
+    pending?.close(); active?.close();
   }
 
   async function ensureConnected(ctx: ExtensionContext, port?: number): Promise<IdeProtocol> {
@@ -48,22 +70,22 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
     attempt = (async () => {
       const candidates = await withAbort(discover(ctx.cwd), ctx.signal);
       const selected = port === undefined ? candidates : candidates.filter(c => c.port === port);
-      if (!selected.length) throw new Error("No live Claude-compatible JetBrains IDE matches this directory. Open this repository in PyCharm, enable the official Claude Code plugin, then run /ide. Use /ide list to inspect matching instances.");
+      if (!selected.length) throw new NoMatchingIdeError("No live Claude-compatible JetBrains IDE matches this directory. Open this repository in PyCharm, enable the official Claude Code plugin, then run /ide. Use /ide list to inspect matching instances.");
       let lastError = "IDE connection failed";
       for (const instance of selected) {
         if (epoch !== generation) throw new Error("IDE connection cancelled");
         const client = new IdeProtocol();
         connecting = client;
         client.connection.onNotification = (method, params) => {
+          if (epoch !== generation || ide !== client && connecting !== client) return;
           context.notification(method, params);
           if (method === "notifications/tools/list_changed") void client.refreshTools().catch(() => {});
         };
         client.connection.onClose = () => {
           if (ide !== client) return;
           ide = undefined; summary = undefined; context.clear();
-          review.cancelPending();
           updateIdeStatus(ctx);
-          ctx.ui.notify("IDE disconnected. Pending IDE requests failed; run /ide to reconnect.", "warning");
+          ctx.ui.notify("IDE disconnected. CLI review remains available; run /ide to reconnect.", "warning");
         };
         try {
           await client.connect(instance, undefined, ctx.signal);
@@ -90,7 +112,6 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
     handler: async (args, ctx) => {
       const arg = args.trim();
       if (arg === "disconnect") {
-        review.cancelPending();
         disconnect(); updateIdeStatus(ctx);
         ctx.ui.notify("IDE disconnected", "info"); return;
       }
@@ -106,7 +127,7 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
         }
         if (arg && !/^\d+$/.test(arg)) throw new Error("Usage: /ide [status|list|disconnect|port]");
         await ensureConnected(ctx, arg ? Number(arg) : undefined);
-        ctx.ui.notify("Connected to JetBrains. Normal editing tools are reviewed automatically in /edit-mode review.", "info");
+        ctx.ui.notify("Connected to JetBrains. In Review mode, approve edits in the CLI or IDE. Auto mode uses the IDE for explicit context requests only.", "info");
       } catch (e) { ctx.ui.notify(e instanceof Error ? e.message : "IDE connection failed", "error"); }
     },
   });
@@ -126,28 +147,25 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("edit-mode", {
-    description: "Set automatic edit handling: /edit-mode [review|auto] (default review)",
+    description: "Set edit approval: /edit-mode [review|auto] (default review; no IDE required)",
     handler: async (args, ctx) => {
       const mode = args.trim();
       if (mode && mode !== "auto" && mode !== "review") {
         ctx.ui.notify("Usage: /edit-mode [auto|review]", "error"); return;
       }
       setEditMode(mode === "auto" || mode === "review" ? mode : review.editMode, ctx);
-      ctx.ui.notify(`Edit mode: ${review.editMode}${review.editMode === "review" ? " — normal editing tools wait for native IDE approval" : " — edits execute normally without IDE review"}`, "info");
+      ctx.ui.notify(`Edit mode: ${review.editMode}${review.editMode === "review" ? " — approve edits in the CLI or a connected IDE" : " — edits execute without approval or IDE diff requests"}`, "info");
     },
   });
   // Ctrl+Q works without mapping macOS Option to Alt. Ctrl+R remains session rename.
   pi.registerShortcut("ctrl+q", {
     description: "Toggle edit mode (Review/Auto)",
-    handler: ctx => {
-      setEditMode(review.editMode === "review" ? "auto" : "review", ctx);
-      ctx.ui.notify(`Edit mode: ${review.editMode.toUpperCase()}`, "info");
-    },
+    handler: ctx => toggleEditMode(ctx),
   });
   // Old editing extensions cannot safely participate without a supported preview.
   pi.on("tool_call", event => {
     if (review.editMode === "review" && ["replace", "replace_within", "insert", "copy", "move", "undo_last_change"].includes(event.toolName)) {
-      return { block: true, reason: "Unsupported editing tool in IDE Review mode. Use built-in edit or write; remove any legacy editing extension." };
+      return { block: true, reason: "Unsupported editing tool in Edit Review mode. Use built-in edit or write; remove any legacy editing extension." };
     }
   });
   pi.on("session_start", (_event, ctx) => {

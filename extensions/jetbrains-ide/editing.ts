@@ -16,7 +16,7 @@ export function registerReviewedEditing(pi: ExtensionAPI, review: EditReview): v
     if (review.editMode !== "review" || !["edit", "write"].includes(event.toolName)) return;
     const expected = event.toolName === "edit" ? edit.parameters : write.parameters;
     if (pi.getAllTools().find(tool => tool.name === event.toolName)?.parameters !== expected) {
-      return { block: true, reason: "IDE Review does not own this editing tool. Remove conflicting editing extensions and restart Pi." };
+      return { block: true, reason: "Edit Review does not own this editing tool. Remove conflicting editing extensions and restart Pi." };
     }
   });
 

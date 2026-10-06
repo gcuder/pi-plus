@@ -1,10 +1,10 @@
 # Pi ↔ official Claude Code JetBrains plugin
 
-A local Pi extension for an **external terminal** and the existing official Claude Code JetBrains plugin. No new IDE plugin, ACP, chat panel, Plan Mode, or general MCP server manager.
+A local Pi extension for **CLI edit review**, with an optional connection to the existing official Claude Code JetBrains plugin. Review works in an external terminal without an IDE. No new IDE plugin, ACP, chat panel, Plan Mode, or general MCP server manager.
 
 ## Install / use
 
-Requires Pi **1.0.2** (`@earendil-works/pi-coding-agent`), Node 22.19+, and the official Claude Code JetBrains plugin enabled in PyCharm. Tested protocol target: plugin **0.1.14-beta**. No running Claude Code CLI or Claude login is needed for the local handshake.
+Requires Pi **1.0.2** (`@earendil-works/pi-coding-agent`) and Node 22.19+. IDE integration additionally requires the official Claude Code JetBrains plugin enabled in PyCharm. Tested protocol target: plugin **0.1.14-beta**. No running Claude Code CLI or Claude login is needed for the local handshake.
 
 ```sh
 # Deploy Pi+ and the reviewed built-in editing tools:
@@ -17,7 +17,7 @@ Restart Pi after installation; do not load the deployed copy and checkout copy t
 
 Existing installs: running the installer replaces the managed settings and npm dependency tree, removing `pi-hashline-edit-pro`. Remove any additional user/project declarations or manually installed copies of that extension before restarting. Review mode checks that the bridge owns `edit` and `write` on every call and blocks conflicting registrations. Remove conflicting editing extensions before restarting.
 
-In Pi, with the same repository open in PyCharm:
+In Pi (open the same repository in PyCharm if you want native IDE diffs):
 
 ```text
 /ide                    # connect to best live matching workspace
@@ -26,28 +26,38 @@ In Pi, with the same repository open in PyCharm:
 /ide 51711              # example only: choose a matching port from /ide list
 /edit-mode              # show mode; default is review each session
 /edit-mode auto         # ordinary edits, no IDE review or preview work
-/edit-mode review       # restore native approval gate
+/edit-mode review       # restore CLI approval, with optional native IDE review
 /ide disconnect
 ```
 
 **Ctrl+Q** toggles Review/Auto using the same mode switch as `/edit-mode`. Ctrl+R remains Pi's session-rename shortcut; Shift+Tab remains thinking-level cycling; pi-code's Ctrl+Alt+P still controls Plan Mode.
 
-Pi's persistent extension status row shows **REVIEW** (the session default) or **AUTO**, followed by `IDE: PyCharm` when connected or `IDE: disconnected` when there is no active connection. Both the command and shortcut update it immediately. The items coexist with Plan Mode and other extension statuses, including in status-aware custom footers. Displaying status never discovers or connects to an IDE. Switching to Auto cancels pending reviews without approving them.
+Pi's persistent extension status row separates edit approval from IDE connectivity:
+
+```text
+[Edits: Review] [IDE: Not connected]
+[Edits: Review] [IDE: PyCharm]
+[Edits: Auto]   [IDE: PyCharm (context only)]
+```
+
+Review is the session default. Both the command and shortcut update status immediately. The items coexist with Plan Mode and other extension statuses, including in status-aware custom footers. Displaying status never discovers or connects to an IDE. `/edit-mode auto` and Ctrl+Q cancel pending reviews without approving them; the review action **Accept and switch to Auto** approves the current proposal and changes the mode.
 
 Pi+'s `config/settings.json` enables OMP's supported `extension_statuses` secondary row. OMP's default Claude preset hides that row; other custom footers must also opt into showing extension statuses. Ctrl+Q works in iTerm2 on macOS without changing the terminal's Option-key settings.
 
-`/ide` discovers lazily; no startup socket or background reconnect loop. Pending changes are never replayed after reconnect. Disconnect cancels pending reviews; a subsequent Review-mode mutation or explicit IDE command can reconnect. To edit without an IDE, use `/edit-mode auto`.
+`/ide` discovers lazily; there is no startup socket or background reconnect loop. In Review mode the CLI appears immediately, while a matching IDE is sought independently. Missing IDEs, connection failures, and `/ide disconnect` leave CLI approval available. Pending changes are never replayed after reconnect. A later Review-mode mutation or explicit IDE command can reconnect. Auto-mode mutations never discover, connect to, open, or wait for an IDE diff. Explicit `/ide` and `ide_context` requests still work in Auto mode.
 
 **Ask Pi to edit normally**, e.g. “Read `example.py` and replace this function.” The model uses its existing tools, not `ide_diff`:
 
 1. The bridge registers Pi's built-in `edit` and `write` definitions with supported filesystem hooks. Schemas, argument preparation, matching, newline handling, rendering and result details come from Pi.
-2. The native tool computes its proposal inside Pi's per-file mutation queue. The official plugin opens its native diff before any write or parent directory creation.
-3. **Apply** authorizes the exact computed proposal. The same native execution continues and writes it after checking that disk content is unchanged.
-4. **Reject**, closing the tab, stale files, missing IDE, unknown response, cancellation or connection loss fails the tool without writing. There is no mutate-then-undo fallback.
+2. The native tool computes its proposal inside Pi's per-file mutation queue. The CLI displays that exact proposal as a colored diff before any write or parent directory creation. A matching IDE can also open its native diff.
+3. Below the CLI diff, choose **Accept**, **Decline**, or **Accept and switch to Auto** with the arrow keys and Enter. On **Decline**, press Tab to enter feedback and Enter to decline with that feedback. Escape from feedback returns to the actions; Escape from the actions cancels. Page keys scroll long diffs; Left/Right scroll long lines while keeping line numbers visible.
+4. CLI **Accept** and IDE **Apply** authorize the exact proposal. CLI **Decline**, IDE **Reject**, or closing the native tab rejects it. The first valid decision wins; the other review is cancelled and late responses are ignored. Feedback is returned to the agent, with an instruction not to bypass the rejection.
+5. **Accept and switch to Auto** preserves and commits the accepted operation, changes the session mode, and cancels any other pending review calls without approving them. Subsequent calls use the native tools directly. Existing filesystem safety checks still apply to the accepted operation.
+6. Stale files, edited IDE proposals, and cancellation never authorize a write. An unavailable or incompatible IDE leaves the CLI as the approval surface. There is no mutate-then-undo fallback.
 
-Use one `edit` call with multiple disjoint `edits[]` entries to review a combined change to one file. Separate calls each get their own review; calls targeting the same file are serialized through review and commit. Changes to different files are not an all-or-nothing transaction. No-op calls need no IDE review.
+Use one `edit` call with multiple disjoint `edits[]` entries to review a combined change to one file. Separate calls each get their own review; calls targeting the same file are serialized through review and commit. Changes to different files are not an all-or-nothing transaction. No-op calls need no CLI or IDE review.
 
-The native proposed side is editable, but **editing it makes approval fail closed** (except the plugin's LF normalization). Reject and request a revised edit instead. Pi's native tool remains responsible for BOM and newline behavior; the IDE response is never written directly.
+The native proposed side is editable, but **edited IDE text cannot authorize a write** (except the plugin's LF normalization). The CLI can still approve the original computed proposal. To apply a different change, decline with feedback and request a revised proposal. Pi's native tool remains responsible for BOM and newline behavior; the IDE response is never written directly.
 
 `ide_diff` was removed: review is internal to normal editing, not a model-facing opt-in tool. `/edit-mode` is independent of `pi-code` Plan Mode. Calls still pass through Pi's tool validation and permission hooks before execution. Auto delegates directly to unmodified native tools without review-specific proposals, disk checks or IDE work.
 
@@ -97,7 +107,8 @@ This is an **unofficial internal Claude IDE protocol**, not a supported Anthropi
 - Native response LF normalization is accounted for; the original tool remains responsible for exact BOM/newline bytes. Proposals over 2 MiB, binary/invalid UTF-8 files, symlinks and targets outside Pi's cwd fail closed in Review mode.
 - No filesystem sandbox: shell scripts, formatters, custom tools, deletion/rename through other tools, and other processes are **not intercepted**. A rejected change must not be retried via another tool. Review protects the listed mutation tools, not arbitrary disk access.
 - Review covers only `edit` and `write`. There is no built-in anchor editing, cross-file move/copy, batch undo or rollback. Legacy `replace`, `replace_within`, `insert`, `copy`, `move` and `undo_last_change` calls are blocked in Review mode if another extension still registers them.
-- Review timeout: 30 minutes; ordinary RPC timeout: 10 seconds; connection timeout: 5 seconds. Close/reject the native tab or use `/ide disconnect` / `/edit-mode auto` to cancel a pending review. Switching mode cancels the pending call; it does **not** retroactively approve it. Native tool abort signals cancel pending reviews and queued edits. Cancellation cannot reverse a filesystem write already in progress. Best-effort tab cleanup is not guaranteed if the IDE vanishes.
+- Native diff timeout: 30 minutes; ordinary RPC timeout: 10 seconds; connection timeout: 5 seconds. CLI review waits for your decision. Closing/rejecting the native tab rejects the edit; `/ide disconnect` removes the native review while leaving the CLI available. Escape, Ctrl+Q, `/edit-mode auto`, session shutdown, or a tool abort cancels pending reviews and queued edits without approval. **Accept and switch to Auto** is the explicit exception for the current proposal. Cancellation cannot reverse a filesystem write already in progress. Best-effort tab cleanup is not guaranteed if the IDE vanishes.
+- Custom diff controls require interactive TUI mode. Non-TUI sessions can use native IDE approval; without an IDE they fail closed and require explicit Auto mode for unattended edits.
 - No heartbeats initiated by this client; server MCP pings are answered. A half-open connection is detected by request timeout/transport failure, not immediately while idle.
 - `pi-code` remains owner of Plan Mode and permissions. The bridge wraps native `edit` and `write` through supported tool registration and never invokes nested editing tools.
 - The bridge uses the public `createEditToolDefinition` and `createWriteToolDefinition` APIs. Pi owns path normalization, replacement matching and per-file serialization. The bridge delays filesystem writes for approval; it does not patch npm packages or maintain a second editing algorithm. Re-run parity and manual approval tests before upgrading Pi.
@@ -112,20 +123,19 @@ npm test --prefix extensions/jetbrains-ide
 npm run typecheck --prefix extensions/jetbrains-ide
 ```
 
-Tests use Node's built-in runner, fake sockets and temporary fixtures; no PyCharm is required. Native tool tests compare reviewed execution against unmodified Pi definitions, including results and BOM/CRLF/mixed-ending bytes. Coverage includes transport/auth/discovery, registration/modes, multi-replacement edits, parallel same-file calls, rejection without creating directories, stale files, edited proposals, invalid inputs, unsafe paths, late symlink/inode replacement, tool ownership conflicts, unsupported Pi versions and cancellation. A real SDK session verifies argument preparation, validation and permission hooks. A real Pi TUI with a test terminal verifies shortcut registration, terminal key dispatch, persistent footer rendering and coexistence with pi-code Plan Mode. A fake JetBrains server verifies that toggling to Auto cancels active and queued reviews without writing. Strict TypeScript checks cover the extension and tests.
+Tests use Node's built-in runner, fake sockets and temporary fixtures; no PyCharm is required. Native tool tests compare reviewed execution against unmodified Pi definitions, including results and BOM/CRLF/mixed-ending bytes. Coverage includes transport/auth/discovery, registration/modes, multi-replacement edits, parallel same-file calls, rejection without creating directories, stale files, edited proposals, invalid inputs, unsafe paths, late symlink/inode replacement, tool ownership conflicts, unsupported Pi versions and cancellation. CLI tests cover actions, feedback, resizing, Unicode, scrolling, and abort cleanup. Coordination tests cover either surface winning, late responses, slow cleanup, missing/disconnected IDEs, and Accept-and-Auto. A real SDK session verifies argument preparation, validation and permission hooks in both modes. A real Pi TUI with a test terminal verifies CLI-only edit/write approval, feedback, Accept-and-Auto, Ctrl+Q, persistent footer rendering, and coexistence with pi-code Plan Mode. A fake JetBrains server verifies cancellation, Auto bypass, and explicit context requests in Auto mode. Strict TypeScript checks cover the extension and tests.
 
-Automated approval tests simulate IDE decisions. The previous bridge's handshake/tabs/diagnostics and live UI were verified against plugin 0.1.14-beta; the migrated native editing flow still needs the manual Apply/Reject checks below.
+Automated IDE approval tests simulate plugin decisions. The previous bridge's handshake/tabs/diagnostics and live UI were verified against plugin 0.1.14-beta. The CLI/IDE combination and visual comparison with Claude Code still require the manual checks below.
 
 ## Manual integration acceptance test
 
-1. Open a **disposable repository** in PyCharm with the official plugin enabled. Save all buffers. Create/commit `ide-review.txt` containing `before\n`, plus a second file for transfer tests. Keep Claude Code closed initially.
-2. Run the installer, restart Pi in an external terminal from that repository, then `/ide`, `/ide status`, `/edit-mode`. Verify the matching workspace and **review** default. Repeat discovery with two projects open.
-3. Select text in PyCharm; ask for `ide_context` selection/tabs/diagnostics. Verify no unsolicited editor context per turn.
-4. Ask for a normal edit using `read` then `edit` (do **not** request `ide_diff`). Verify the native two-pane diff appears while disk remains unchanged. Click **Reject**; disk must remain unchanged. Repeat and close the tab; expect rejection.
-5. Repeat and click **Apply** without modifying the proposed side. Verify disk and `git diff` match the proposal. Repeat with `write`, including a new nested path: rejecting must not create parent directories. Restore fixtures through Git when needed; there is no hashline undo tool.
-6. Request one `edit` call containing two disjoint entries in `edits[]`. Verify one combined proposal and no partial writes on rejection. Request two separate same-file calls and verify each reviews the file state produced by the preceding accepted call.
-7. `/edit-mode auto`: repeat ordinary edits; they must execute without IDE review. `/edit-mode review`: the next edit must review again. While waiting, `/edit-mode auto`, `/ide disconnect` or Escape must cancel the pending review, not approve it. Quit PyCharm during review; disk must remain unchanged and old proposals must not replay after reconnect.
-8. Edit the target on disk during review, then Apply: expect a concurrent-change failure preserving that external change. Modify the proposed side in the IDE and Apply: expect failure rather than silently writing different content.
-9. Enable `pi-code` Plan Mode and verify its permissions still apply in both edit modes. Optionally run Claude Code alongside Pi and check terminal focus behavior. Disconnect/reload/exit Pi and check cleanup.
+1. Create a **disposable repository** with a committed `ide-review.txt` containing `before\n`. Run the installer and restart Pi in an external terminal. With no matching IDE open, verify `[Edits: Review] [IDE: Not connected]`. Ask for an ordinary edit and verify the CLI diff and three actions appear while disk remains unchanged.
+2. Select **Decline**, press Tab, type a correction, and press Enter. Verify disk is unchanged and the agent receives the feedback. Repeat with **Accept** and verify `git diff` matches the displayed proposal. Test `write` to an existing file and a new nested path; declining must not create parent directories. Compare the displayed information and action flow with Claude Code.
+3. Open the same repository in PyCharm with the official plugin enabled. Save all buffers. Run `/ide`, `/ide status`, and `/edit-mode`. Verify the matching workspace, separate mode/IDE indicators, and Review default. Repeat discovery with two projects open.
+4. Ask for a normal edit. Verify the CLI and native two-pane diff display the same proposal. Approve once from each surface and verify the other review closes. Repeat with CLI **Decline**, IDE **Reject**, and closing the native tab; disk must remain unchanged. Check that tab cleanup does not turn CLI acceptance into rejection.
+5. Choose **Accept and switch to Auto** in the CLI. Verify the current change is written once, status changes immediately, and later edits open no CLI or IDE review. Repeat ordinary `edit` and `write` calls with `/edit-mode auto`. Explicit `ide_context` selection/tabs/diagnostics must still work, with no unsolicited context injection.
+6. Restore `/edit-mode review`. Request multiple disjoint replacements in one `edit` call and verify one combined proposal. Request separate same-file calls and verify each uses the preceding accepted state. While waiting, Ctrl+Q, `/edit-mode auto`, or Escape must cancel rather than approve. `/ide disconnect` or quitting PyCharm must leave the CLI review available. Cancel it and reconnect; old proposals must not replay.
+7. Edit the target on disk during review, then accept: expect a concurrent-change failure preserving the external change. Modify the proposed side in PyCharm and Apply: it must not write the modified text. The CLI may still approve its original proposal.
+8. Check long diffs, narrow terminal widths, resizing, feedback editing, and restoration of an unsent prompt after review. Enable `pi-code` Plan Mode and verify its permissions in both edit modes. Optionally run Claude Code alongside Pi and check terminal focus behavior. Disconnect/reload/exit Pi and check cleanup.
 
 Record Pi/plugin versions and actual Apply/Reject results. No credentials should appear in status, tool outputs or logs.
