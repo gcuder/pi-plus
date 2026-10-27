@@ -15,9 +15,8 @@ node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if
 
 if ! command -v pi >/dev/null 2>&1; then
   info "Installing Pi coding agent..."
-  npm install --global @earendil-works/pi-coding-agent@1.0.2
+  npm install --global @earendil-works/pi-coding-agent
 fi
-[[ "$(pi --version)" == "1.0.2" ]] || fail "Pi Plus IDE review requires Pi 1.0.2. Install that version before replacing managed files."
 
 mkdir -p "$PI_AGENT_DIR/extensions" "$PI_AGENT_DIR/skills" "$PI_AGENT_DIR/npm"
 

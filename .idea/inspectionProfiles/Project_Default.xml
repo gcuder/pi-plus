@@ -1,0 +1,50 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="Eslint" enabled="true" level="WARNING" enabled_by_default="true" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="google-auth" />
+          <option value="httpx" />
+          <option value="jinja2" />
+          <option value="langchain" />
+          <option value="langchain-community" />
+          <option value="langchain-core" />
+          <option value="langchain-openai" />
+          <option value="langfuse" />
+          <option value="langgraph" />
+          <option value="openai" />
+          <option value="pillow" />
+          <option value="pydantic" />
+          <option value="pyyaml" />
+          <option value="redis" />
+          <option value="replicate" />
+          <option value="requests" />
+          <option value="tenacity" />
+          <option value="toons" />
+          <option value="ai-backend-sdk" />
+          <option value="asyncmy" />
+          <option value="crawl4ai" />
+          <option value="fastapi" />
+          <option value="google-cloud-secret-manager" />
+          <option value="google-genai" />
+          <option value="gunicorn" />
+          <option value="pyjwt" />
+          <option value="scipy" />
+          <option value="sqlalchemy" />
+          <option value="ujson" />
+          <option value="uvicorn" />
+        </list>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="PyStubPackagesAdvertiser" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="pandas" />
+          <option value="scipy" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>

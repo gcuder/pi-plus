@@ -12,7 +12,7 @@ cd pi-plus
 ./scripts/install.sh
 ```
 
-Or, after cloning, run `./scripts/doctor.sh` to check the setup. Authenticate your model providers on the new machine using Pi's normal login flow; credentials are intentionally not included or copied. The installer requires Pi 1.0.2 and installs it when absent; other existing versions are refused before managed files are changed.
+Or, after cloning, run `./scripts/doctor.sh` to check the setup. Authenticate your model providers on the new machine using Pi's normal login flow; credentials are intentionally not included or copied. The installer works with any Pi version and installs the latest one when Pi is absent.
 
 ## What is included
 

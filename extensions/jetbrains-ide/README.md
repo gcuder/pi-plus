@@ -4,7 +4,7 @@ A local Pi extension for **CLI edit review**, with an optional connection to the
 
 ## Install / use
 
-Requires Pi **1.0.2** (`@earendil-works/pi-coding-agent`) and Node 22.19+. IDE integration additionally requires the official Claude Code JetBrains plugin enabled in PyCharm. Tested protocol target: plugin **0.1.14-beta**. No running Claude Code CLI or Claude login is needed for the local handshake.
+Requires Pi (`@earendil-works/pi-coding-agent`, any version) and Node 22.19+. IDE integration additionally requires the official Claude Code JetBrains plugin enabled in PyCharm. Tested protocol target: plugin **0.1.14-beta**. No running Claude Code CLI or Claude login is needed for the local handshake.
 
 ```sh
 # Deploy Pi+ and the reviewed built-in editing tools:
@@ -20,7 +20,7 @@ Existing installs: running the installer replaces the managed settings and npm d
 In Pi (open the same repository in PyCharm if you want native IDE diffs):
 
 ```text
-/ide                    # connect to best live matching workspace
+/ide                    # select a live IDE matching this workspace
 /ide status
 /ide list
 /ide 51711              # example only: choose a matching port from /ide list
@@ -93,7 +93,7 @@ Research reference: <https://github.com/ldelossa/pi-ide/blob/main/client.ts> (`@
 
 - Only recognized JetBrains IDE names with `transport: ws` and absolute workspaces are considered. Windows/remote lock files are excluded on this local implementation.
 - PID liveness and a bounded loopback TCP probe filter stale entries; authenticated MCP handshake validates the actual server. A live PID alone is not proof of a usable plugin (PID reuse/port reuse).
-- Realpath workspace scoring: exact match, deepest ancestor, then nearest child workspace. Unrelated workspaces are never auto-selected. Multiple candidates are ranked deterministically by score then port; failed handshakes fall back to the next candidate. `/ide list` and `/ide <port>` allow explicit selection among matches.
+- Realpath workspace scoring: exact match, deepest ancestor, then nearest child workspace. Unrelated workspaces are never offered or accepted, including by explicit port. `/ide` opens a selector with matching live IDEs and an explicit **None** option to disconnect (or abort when not connected). A single match shows its IDE name; multiple matches also show ports and workspace paths. The selector also opens when already connected. Choosing **None** disconnects the current IDE; cancelling leaves the current connection unchanged. The selected port is checked against discovery again before connecting, with no fallback to another IDE. Without a UI, use `/ide list` and `/ide <port>`. Automatic connections for review and context rank candidates by score then port and fall back after failed handshakes.
 - Always numeric port + literal IPv4 loopback; no lock-supplied host/URL, redirects, DNS discovery or remote transport. Lock files are read, never modified/deleted.
 - Tokens exist only during discovery/upgrade, not in status, model context, transcript entries, configuration or error logs. Transport/RPC errors are sanitized. Local processes running as your user can still access the original Claude lock directory; protect its permissions.
 - Diff targets must be regular text files inside Pi's current working directory (or new write targets, including missing parents). Symlink targets and outside paths are rejected. Snapshots and commits use `O_NOFOLLOW`; existing targets must retain their reviewed file identity and bytes. Commits write through the verified file descriptor, and new files use exclusive creation. Filesystems without `O_NOFOLLOW` support fail closed. Disk changes during review abort the write. This is optimistic checking, not an atomic cross-process lock: do not concurrently edit the same file or rename its parent directories during Apply.

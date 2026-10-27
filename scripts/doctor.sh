@@ -23,7 +23,7 @@ has_extension_packages() { [[ -x "$PI_AGENT_DIR/npm/node_modules/.bin" || -d "$P
 check "Node.js installed" has_command node
 check "npm installed" has_command npm
 check "Pi CLI installed" has_command pi
-check "Supported Pi version (1.0.2)" bash -c '[[ "$(pi --version)" == "1.0.2" ]]'
+printf 'INFO Pi version: %s\n' "$(pi --version 2>/dev/null || echo unknown)"
 check "Pi settings present and valid JSON" valid_json "$PI_AGENT_DIR/settings.json"
 check "Pi models config present and valid JSON" valid_json "$PI_AGENT_DIR/models.json"
 check "Pi package dependencies installed" has_extension_packages
