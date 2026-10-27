@@ -108,7 +108,7 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
   }
 
   pi.registerCommand("ide", {
-    description: "Connect PyCharm: /ide [status|list|disconnect|port]",
+    description: "Select a matching JetBrains IDE: /ide [status|list|disconnect|port]",
     handler: async (args, ctx) => {
       const arg = args.trim();
       if (arg === "disconnect") {
@@ -126,7 +126,23 @@ export default function jetbrainsIde(pi: ExtensionAPI): void {
           ctx.ui.notify(instances.map(i => `${i.ideName} :${i.port} — ${i.workspaceFolders.join(", ")}`).join("\n") || "No live matching JetBrains instances found", "info"); return;
         }
         if (arg && !/^\d+$/.test(arg)) throw new Error("Usage: /ide [status|list|disconnect|port]");
-        await ensureConnected(ctx, arg ? Number(arg) : undefined);
+        let port = arg ? Number(arg) : undefined;
+        if (!arg) {
+          const instances = await discover(ctx.cwd);
+          if (!ctx.hasUI) throw new Error("IDE selection requires a UI. Use /ide list, then /ide <port>.");
+          const labels = instances.map(i => instances.length === 1 ? i.ideName : `${i.ideName} :${i.port} — ${i.workspaceFolders.join(", ")}`);
+          const choice = await ctx.ui.select("Select IDE for this workspace", [...labels, "None"]);
+          if (choice === undefined) return;
+          if (choice === "None") {
+            disconnect(); updateIdeStatus(ctx);
+            ctx.ui.notify("IDE disconnected", "info");
+            return;
+          }
+          const selected = instances[labels.indexOf(choice)];
+          if (!selected) return;
+          port = selected.port;
+        }
+        await ensureConnected(ctx, port);
         ctx.ui.notify("Connected to JetBrains. In Review mode, approve edits in the CLI or IDE. Auto mode uses the IDE for explicit context requests only.", "info");
       } catch (e) { ctx.ui.notify(e instanceof Error ? e.message : "IDE connection failed", "error"); }
     },

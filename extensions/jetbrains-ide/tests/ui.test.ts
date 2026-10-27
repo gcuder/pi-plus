@@ -10,6 +10,72 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionToolContext, ToolD
 import jetbrainsIde from "../index.ts";
 import { IdeProtocol, PROTOCOL_VERSION } from "../protocol.ts";
 
+test("/ide selects only live matching workspaces and revalidates the selected port", async t => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-ide-selector-"));
+  const home = process.env.HOME;
+  process.env.HOME = cwd;
+  t.after(async () => {
+    if (home === undefined) delete process.env.HOME; else process.env.HOME = home;
+    await rm(cwd, { recursive: true, force: true });
+  });
+  const lockDir = join(cwd, ".claude", "ide");
+  await mkdir(lockDir, { recursive: true });
+  const ports: number[] = [];
+  for (const [ideName, workspace] of [["PyCharm", cwd], ["WebStorm", cwd], ["IntelliJ IDEA", join(cwd, "../other-workspace")]]) {
+    const server = createServer();
+    server.listen(0, "127.0.0.1"); await once(server, "listening");
+    t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+    const port = (server.address() as { port: number }).port;
+    ports.push(port);
+    await writeFile(join(lockDir, `${port}.lock`), JSON.stringify({
+      pid: process.pid, workspaceFolders: [workspace], ideName, transport: "ws", authToken: "test-only-token",
+    }));
+  }
+  const f = fixture(cwd);
+  f.ctx.hasUI = true;
+  const connect = t.mock.method(IdeProtocol.prototype, "connect", async () => { throw new Error("Test handshake failure"); });
+  let choice: "cancel" | "none" | "select" | "stale" = "cancel";
+  f.ctx.ui.select = async (title, labels) => {
+    assert.match(title, /Select IDE/);
+    assert.equal(labels.length, 3);
+    assert.equal(labels.at(-1), "None");
+    assert.ok(labels.some(label => label.includes(`PyCharm :${ports[0]}`)));
+    assert.ok(labels.some(label => label.includes(`WebStorm :${ports[1]}`)));
+    assert.ok(labels.every(label => !label.includes("IntelliJ IDEA")));
+    if (choice === "cancel") return undefined;
+    if (choice === "none") return "None";
+    if (choice === "stale") await rm(join(lockDir, `${ports[1]}.lock`));
+    return labels.find(label => label.includes(`:${ports[1]} —`));
+  };
+  await f.commands.get("ide")!.handler("", f.ctx);
+  assert.equal(connect.mock.callCount(), 0, "Cancelling does not connect");
+  choice = "none";
+  await f.commands.get("ide")!.handler("", f.ctx);
+  assert.equal(connect.mock.callCount(), 0, "None aborts without connecting");
+  choice = "select";
+  await f.commands.get("ide")!.handler("", f.ctx);
+  assert.equal(connect.mock.callCount(), 1, "No fallback to another IDE after explicit selection");
+  assert.equal((connect.mock.calls[0].arguments[0] as { port: number }).port, ports[1]);
+  choice = "stale";
+  await f.commands.get("ide")!.handler("", f.ctx);
+  assert.equal(connect.mock.callCount(), 1, "A vanished choice is rejected before connecting");
+  await f.commands.get("ide")!.handler(String(ports[2]), f.ctx);
+  assert.equal(connect.mock.callCount(), 1, "Explicit ports cannot bypass workspace filtering");
+  f.ctx.ui.select = async (_title, labels) => {
+    assert.deepEqual(labels, ["PyCharm", "None"]);
+    return "None";
+  };
+  await f.commands.get("ide")!.handler("", f.ctx);
+  assert.equal(connect.mock.callCount(), 1, "A single matching IDE still offers None");
+  await rm(join(lockDir, `${ports[0]}.lock`));
+  f.ctx.ui.select = async (_title, labels) => {
+    assert.deepEqual(labels, ["None"]);
+    return "None";
+  };
+  await f.commands.get("ide")!.handler("", f.ctx);
+  assert.equal(connect.mock.callCount(), 1);
+});
+
 function fixture(cwd = "/not-a-real-directory") {
   const commands = new Map<string, Parameters<ExtensionAPI["registerCommand"]>[1]>();
   const shortcuts = new Map<string, Parameters<ExtensionAPI["registerShortcut"]>[1]>();
@@ -151,7 +217,20 @@ test("shortcut switching to Auto cancels active and queued native reviews, never
   const tabs = await f.tools.get("ide_context")!.execute("context", { kind: "tabs" }, undefined, undefined, f.ctx);
   assert.match(tabs.content[0].type === "text" ? tabs.content[0].text : "", /file.txt/);
   assert.equal(f.statuses.get("jetbrains-ide"), "[IDE: PyCharm (context only)]");
-  await f.commands.get("ide")!.handler("disconnect", f.ctx);
+  f.ctx.hasUI = true;
+  f.ctx.ui.select = async (_title, labels) => {
+    assert.deepEqual(labels, ["PyCharm", "None"]);
+    assert.equal(f.statuses.get("jetbrains-ide"), "[IDE: PyCharm (context only)]");
+    return undefined;
+  };
+  await f.commands.get("ide")!.handler("", f.ctx);
+  assert.equal(f.statuses.get("jetbrains-ide"), "[IDE: PyCharm (context only)]", "Cancelling preserves the connection");
+  f.ctx.ui.select = async (_title, labels) => {
+    assert.deepEqual(labels, ["PyCharm", "None"]);
+    return "None";
+  };
+  await f.commands.get("ide")!.handler("", f.ctx);
   assert.equal(f.statuses.get("jetbrains-ide"), "[IDE: Not connected]");
+  assert.equal(f.notices.at(-1), "IDE disconnected");
   assert.equal(f.statuses.get("edit-mode"), "[Edits: Auto]");
 });
